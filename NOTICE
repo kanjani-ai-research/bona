@@ -1,0 +1,27 @@
+NOTICE
+
+Bona
+Copyright (c) 2026 Evan Erwee
+
+This project is licensed under the MIT License.
+
+---
+
+Third-Party Components
+======================
+
+This project builds upon and integrates with the AWS GraphRAG Toolkit
+(lexical-graph), which is licensed under the Apache License, Version 2.0.
+
+  AWS GraphRAG Toolkit (graphrag-toolkit-lexical-graph)
+  Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+  Licensed under the Apache License, Version 2.0
+  https://github.com/awslabs/graphrag-toolkit
+
+You may obtain a copy of the Apache License at:
+  http://www.apache.org/licenses/LICENSE-2.0
+
+---
+
+Our original additions and modifications in this repository are released
+under the MIT License. See the LICENSE file for the full MIT License text.
