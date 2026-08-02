@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bona"
+version = "0.1.0"
+description = "Infrastructure asset graph — the Joern for cloud. Discovers, maps, and graphs CSP resources."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{name = "Evan Erwee", email = "evan@erwee.com"}]
+keywords = ["aws", "cloud", "assets", "graph", "compliance", "infrastructure", "config"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Security",
+    "Topic :: System :: Systems Administration",
+]
+
+dependencies = [
+    "boto3>=1.35.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+neptune = ["gremlinpython>=3.7.0"]
+all = ["gremlinpython>=3.7.0", "httpx>=0.28.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "moto[config]>=5.0"]
+
+[project.scripts]
+bona = "bona.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bona"]
