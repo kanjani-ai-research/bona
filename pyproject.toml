@@ -24,9 +24,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-neptune = ["gremlinpython>=3.7.0"]
-all = ["gremlinpython>=3.7.0", "httpx>=0.28.0"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "moto[config]>=5.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "black", "ruff"]
 
 [project.scripts]
 bona = "bona.cli:main"

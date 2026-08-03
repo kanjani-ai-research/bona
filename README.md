@@ -1,15 +1,32 @@
 # Bona
 
+[![PyPI version](https://img.shields.io/pypi/v/bona.svg)](https://pypi.org/project/bona/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 **Infrastructure asset graph — the Joern for cloud.**
 
 Discovers, maps, and graphs CSP resources via AWS Config.
 Produces nodes + edges that feed into Neptune for compliance analysis, impact assessment, and risk scoring.
 
-## Quick Start
+> **Standalone package. No dependency on graphrag-toolkit.**
+
+## Installation
 
 ```bash
 pip install bona
+```
 
+## Dependencies
+
+Bona has minimal dependencies:
+- `boto3>=1.35.0` — AWS SDK for resource discovery
+- `pydantic>=2.0` — Data validation and schema models
+
+Bona is a standalone package. It does not depend on `graphrag-document-graph`, `graphrag-codeproperty-graph`, or `graphrag-toolkit-lexical-graph`.
+
+## Quick Start
+
+```bash
 # Discover all resources in an account
 bona discover --account 123456789012 --region us-east-1
 
@@ -47,7 +64,7 @@ AWS Config (already running) → Bona reads → normalizes → outputs graph sch
 ```
 
 Bona is thin. AWS Config does the heavy lifting. Bona just transforms the output
-into a graph schema compatible with the GraphRAG Toolkit (lexical-graph, document-graph, codeproperty-graph).
+into a graph schema compatible with the GraphRAG Toolkit ecosystem.
 
 ## Package Structure
 
@@ -61,16 +78,20 @@ bona/
   └── cli.py            standalone CLI tool
 ```
 
-## Integration
+## Dependency Chain
 
-Part of the GraphRAG Toolkit ecosystem:
-- **lexical-graph** — foundation (storage, vectors, retrieval)
-- **document-graph** — documents (Confluence, PDFs)
-- **codeproperty-graph** — code (Joern → vulnerabilities)
-- **bona** — infrastructure (AWS Config → compliance)
+```
+bona (standalone)
+├── boto3>=1.35.0
+└── pydantic>=2.0
+```
 
-All produce nodes + edges for the same Neptune instance. Unified queries across all domains.
+Bona is independent. It produces graph-compatible output but does not import or require any graphrag packages.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and PR guidelines.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE) for details.
