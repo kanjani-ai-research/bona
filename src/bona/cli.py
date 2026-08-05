@@ -1,77 +1,133 @@
-"""Bona CLI — standalone asset discovery tool.
+"""Bona CLI — Asset Property Graph from AWS Config.
 
 Usage:
-    bona discover --account 123456789012 --region us-east-1
-    bona services --region us-east-1
-    bona compliance --account 123456789012
+    bona export --profile nw --region us-east-1
+    bona export --profile nw --region us-east-1 --output-dir ./my-apg/
+    bona export --profile nw --region us-east-1 --s3-uri s3://bucket/prefix/
+    bona export --profile nw --types "AWS::EC2::*,AWS::S3::*"
 """
 
 import argparse
 import json
+import logging
 import sys
-
-from .providers.aws.aws_provider import AWSProvider
-from .pipeline.discovery_pipeline import DiscoveryPipeline
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Bona — Infrastructure asset graph")
-    sub = parser.add_subparsers(dest="command")
+    parser = argparse.ArgumentParser(
+        prog="bona",
+        description="Asset Property Graph — the Joern for cloud infrastructure",
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
 
-    # discover
-    disc = sub.add_parser("discover", help="Discover all resources + relationships")
-    disc.add_argument("--account", default="", help="AWS account ID")
-    disc.add_argument("--region", default="us-east-1", help="AWS region")
-    disc.add_argument("--types", nargs="*", help="Resource types to discover")
-    disc.add_argument("--output", choices=["json", "summary"], default="summary")
+    subparsers = parser.add_subparsers(dest="command")
 
-    # services
-    svc = sub.add_parser("services", help="Enumerate AWS services + operations")
-    svc.add_argument("--region", default="us-east-1")
+    # export command
+    export_parser = subparsers.add_parser("export", help="Export Asset Property Graph (nodes.json + edges.json)")
+    export_parser.add_argument("--profile", default="", help="AWS profile name (from ~/.aws/credentials)")
+    export_parser.add_argument("--region", default="us-east-1", help="AWS region (comma-separated for multi-region)")
+    export_parser.add_argument("--output-dir", default="./bona-output", help="Local output directory (default: ./bona-output)")
+    export_parser.add_argument("--s3-uri", default="", help="S3 URI for upload (e.g. s3://bucket/prefix/). Requires explicit opt-in.")
+    export_parser.add_argument("--types", default="", help="Resource type filter (comma-separated, supports globs like AWS::EC2::*)")
+    export_parser.add_argument("--max-resources", type=int, default=10000, help="Safety cap on resources (default: 10000)")
+    export_parser.add_argument("--include-compliance", action="store_true", help="Include Config rule compliance findings as nodes")
 
-    # compliance
-    comp = sub.add_parser("compliance", help="Check compliance state")
-    comp.add_argument("--account", default="")
-    comp.add_argument("--region", default="us-east-1")
+    # services command (list discoverable resource types)
+    svc_parser = subparsers.add_parser("types", help="List resource types tracked by AWS Config")
+    svc_parser.add_argument("--profile", default="", help="AWS profile name")
+    svc_parser.add_argument("--region", default="us-east-1", help="AWS region")
 
     args = parser.parse_args()
 
-    if args.command == "discover":
-        provider = AWSProvider(account_id=args.account, region=args.region)
-        pipeline = DiscoveryPipeline(provider)
-        result = pipeline.run()
-        if args.output == "json":
-            print(json.dumps({
-                "resources": [{"id": r.id, "type": r.resource_type, "name": r.name} for r in result.resources],
-                "relationships": [{"source": e.source_id, "target": e.target_id, "type": e.edge_type} for e in result.relationships],
-                "findings": [{"id": f.id, "type": f.resource_type, "state": f.state} for f in result.findings],
-            }, indent=2))
-        else:
-            print(result.summary())
-            print(f"\nResource types:")
-            types = {}
-            for r in result.resources:
-                types[r.resource_type] = types.get(r.resource_type, 0) + 1
-            for t, c in sorted(types.items(), key=lambda x: -x[1]):
-                print(f"  {t}: {c}")
+    # Logging
+    level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
-    elif args.command == "services":
-        provider = AWSProvider(region=args.region)
-        services = provider.discover_services()
-        print(f"AWS Services: {len(services)}")
-        for s in sorted(services, key=lambda x: x["service_name"]):
-            print(f"  {s['service_name']}: {s['operation_count']} operations")
-
-    elif args.command == "compliance":
-        provider = AWSProvider(account_id=args.account, region=args.region)
-        result = provider.discover_compliance()
-        print(f"Non-compliant resources: {len(result.findings)}")
-        for f in result.findings:
-            print(f"  ❌ {f.resource_type}: {f.properties.get('resource_id', '')}")
-
-    else:
+    if not args.command:
         parser.print_help()
         sys.exit(1)
+
+    if args.command == "export":
+        _do_export(args)
+    elif args.command == "types":
+        _do_types(args)
+
+
+def _do_export(args):
+    """Run export: discover → write nodes.json + edges.json."""
+    from .providers.aws.aws_provider import AWSProvider
+    from .export import export_to_dir, export_to_s3
+
+    # Parse resource type filter
+    type_filter = [t.strip() for t in args.types.split(",") if t.strip()] or None
+
+    # Parse regions
+    regions = [r.strip() for r in args.region.split(",") if r.strip()]
+
+    all_results = []
+    for region in regions:
+        print(f"\n{'='*60}")
+        print(f"  Bona — Asset Property Graph Export")
+        print(f"  Profile: {args.profile or '(default)'}")
+        print(f"  Region:  {region}")
+        print(f"  Cap:     {args.max_resources} resources")
+        if type_filter:
+            print(f"  Filter:  {', '.join(type_filter)}")
+        print(f"{'='*60}\n")
+
+        provider = AWSProvider(
+            profile=args.profile,
+            region=region,
+            max_resources=args.max_resources,
+            resource_types=type_filter,
+            include_compliance=args.include_compliance,
+        )
+
+        result = provider.discover()
+        all_results.append(result)
+
+        # Write to local dir (always — default behavior)
+        output_dir = args.output_dir
+        if len(regions) > 1:
+            output_dir = f"{args.output_dir}/{region}"
+
+        manifest = export_to_dir(result, output_dir)
+
+        print(f"\n  ✅ {result.summary()}")
+        print(f"  📁 {output_dir}/nodes.json ({manifest['node_count']} nodes)")
+        print(f"  📁 {output_dir}/edges.json ({manifest['edge_count']} edges)")
+
+        # Optional S3 upload (only if explicitly configured)
+        if args.s3_uri:
+            s3_prefix = args.s3_uri.rstrip("/")
+            if len(regions) > 1:
+                s3_prefix = f"{s3_prefix}/{region}"
+            s3_manifest = export_to_s3(result, s3_prefix, profile=args.profile)
+            print(f"  ☁️  Uploaded to {s3_manifest.get('nodes_s3', args.s3_uri)}")
+
+    # Summary
+    if len(regions) > 1:
+        total_nodes = sum(r.resource_count for r in all_results)
+        total_edges = sum(r.relationship_count for r in all_results)
+        print(f"\n  📊 Total across {len(regions)} regions: {total_nodes} nodes, {total_edges} edges")
+
+
+def _do_types(args):
+    """List resource types tracked by Config in this region."""
+    from .providers.aws.aws_provider import AWSProvider
+
+    provider = AWSProvider(profile=args.profile, region=args.region)
+    types = provider._get_resource_types()
+
+    print(f"\nResource types tracked by AWS Config ({args.region}):")
+    print(f"{'='*50}")
+    for t in sorted(types):
+        print(f"  {t}")
+    print(f"\nTotal: {len(types)} types")
 
 
 if __name__ == "__main__":
