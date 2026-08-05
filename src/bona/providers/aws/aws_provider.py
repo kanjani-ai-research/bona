@@ -68,11 +68,13 @@ class AWSProvider:
         max_resources: int = 10000,
         resource_types: list[str] | None = None,
         include_compliance: bool = False,
+        aggregator: str = "",
     ):
         self.region = region
         self.max_resources = max_resources
         self.resource_type_filter = resource_types
         self.include_compliance = include_compliance
+        self.aggregator = aggregator
 
         session_kwargs = {"region_name": region}
         if profile:
@@ -209,17 +211,27 @@ class AWSProvider:
         nodes = []
         edges = []
 
-        # SQL query — SELECT all properties for this resource type
         sql = f"SELECT * WHERE resourceType = '{resource_type}'"
 
         try:
             next_token = None
             while True:
-                kwargs = {"Expression": sql, "Limit": _PAGE_LIMIT}
-                if next_token:
-                    kwargs["NextToken"] = next_token
-
-                resp = self._config.select_resource_config(**kwargs)
+                if self.aggregator:
+                    # Multi-account: use aggregate query
+                    kwargs = {
+                        "Expression": sql,
+                        "ConfigurationAggregatorName": self.aggregator,
+                        "Limit": _PAGE_LIMIT,
+                    }
+                    if next_token:
+                        kwargs["NextToken"] = next_token
+                    resp = self._config.select_aggregate_resource_config(**kwargs)
+                else:
+                    # Single account
+                    kwargs = {"Expression": sql, "Limit": _PAGE_LIMIT}
+                    if next_token:
+                        kwargs["NextToken"] = next_token
+                    resp = self._config.select_resource_config(**kwargs)
 
                 for result_str in resp.get("Results", []):
                     try:
@@ -542,6 +554,62 @@ class AWSProvider:
                     ))
             except ClientError as e:
                 logger.debug("Compliance fallback: %s", e)
+
+        # Enrich findings with rule metadata (description, source, scope)
+        if findings:
+            findings = self._enrich_findings_with_rule_metadata(findings)
+
+        return findings
+
+    def _enrich_findings_with_rule_metadata(self, findings: list[AssetNode]) -> list[AssetNode]:
+        """Add describe_config_rules metadata to Finding nodes."""
+        # Collect all unique rule names across findings
+        all_rules = set()
+        for f in findings:
+            for rule in f.properties.get("failing_rules", []):
+                if rule:
+                    all_rules.add(rule)
+
+        if not all_rules:
+            return findings
+
+        # Fetch rule metadata in batches of 25 (API limit)
+        rule_metadata = {}
+        rule_list = list(all_rules)
+        for i in range(0, len(rule_list), 25):
+            batch = rule_list[i:i + 25]
+            try:
+                resp = self._config.describe_config_rules(ConfigRuleNames=batch)
+                for rule in resp.get("ConfigRules", []):
+                    name = rule.get("ConfigRuleName", "")
+                    rule_metadata[name] = {
+                        "description": rule.get("Description", ""),
+                        "source_owner": rule.get("Source", {}).get("Owner", ""),
+                        "source_identifier": rule.get("Source", {}).get("SourceIdentifier", ""),
+                        "scope_resource_types": rule.get("Scope", {}).get("ComplianceResourceTypes", []),
+                        "input_parameters": rule.get("InputParameters", ""),
+                        "rule_arn": rule.get("ConfigRuleArn", ""),
+                        "rule_state": rule.get("ConfigRuleState", ""),
+                    }
+            except ClientError as e:
+                logger.debug("describe_config_rules failed: %s", e)
+
+        # Attach metadata to findings
+        if rule_metadata:
+            for f in findings:
+                rules = f.properties.get("failing_rules", [])
+                rule_details = []
+                for rule_name in rules:
+                    meta = rule_metadata.get(rule_name, {})
+                    if meta:
+                        rule_details.append({
+                            "rule_name": rule_name,
+                            "description": meta["description"],
+                            "source": f"{meta['source_owner']}:{meta['source_identifier']}",
+                            "scope": meta["scope_resource_types"],
+                        })
+                if rule_details:
+                    f.properties["rule_details"] = rule_details
 
         return findings
 

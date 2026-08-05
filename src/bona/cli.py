@@ -31,6 +31,16 @@ def main():
     export_parser.add_argument("--types", default="", help="Resource type filter (comma-separated, supports globs like AWS::EC2::*)")
     export_parser.add_argument("--max-resources", type=int, default=10000, help="Safety cap on resources (default: 10000)")
     export_parser.add_argument("--include-compliance", action="store_true", help="Include Config rule compliance findings as nodes")
+    export_parser.add_argument("--aggregator", default="", help="Config aggregator name for multi-account queries")
+
+    # history command
+    history_parser = subparsers.add_parser("history", help="Export temporal graph — resource config over time")
+    history_parser.add_argument("--profile", default="", help="AWS profile name")
+    history_parser.add_argument("--region", default="us-east-1", help="AWS region")
+    history_parser.add_argument("--resource-type", required=True, help="Resource type (e.g. AWS::EC2::Instance)")
+    history_parser.add_argument("--resource-id", required=True, help="Resource ID")
+    history_parser.add_argument("--limit", type=int, default=20, help="Max history items (default: 20)")
+    history_parser.add_argument("--output-dir", default="./bona-output", help="Local output directory")
 
     # services command (list discoverable resource types)
     svc_parser = subparsers.add_parser("types", help="List resource types tracked by AWS Config")
@@ -55,6 +65,8 @@ def main():
         _do_export(args)
     elif args.command == "types":
         _do_types(args)
+    elif args.command == "history":
+        _do_history(args)
 
 
 def _do_export(args):
@@ -85,6 +97,7 @@ def _do_export(args):
             max_resources=args.max_resources,
             resource_types=type_filter,
             include_compliance=args.include_compliance,
+            aggregator=args.aggregator,
         )
 
         result = provider.discover()
@@ -128,6 +141,131 @@ def _do_types(args):
     for t in sorted(types):
         print(f"  {t}")
     print(f"\nTotal: {len(types)} types")
+
+
+def _do_history(args):
+    """Export temporal graph — configuration history for a single resource."""
+    import json
+    from pathlib import Path
+
+    import boto3
+    from .schema.model import AssetNode, AssetEdge
+
+    session_kwargs = {"region_name": args.region}
+    if args.profile:
+        session_kwargs["profile_name"] = args.profile
+    session = boto3.Session(**session_kwargs)
+    config_client = session.client("config", region_name=args.region)
+    sts = session.client("sts")
+    account_id = sts.get_caller_identity()["Account"]
+
+    print(f"\n{'='*60}")
+    print(f"  Bona — Resource Config History")
+    print(f"  Resource: {args.resource_type} / {args.resource_id}")
+    print(f"  Limit:    {args.limit} items")
+    print(f"{'='*60}\n")
+
+    # Fetch history
+    try:
+        resp = config_client.get_resource_config_history(
+            resourceType=args.resource_type,
+            resourceId=args.resource_id,
+            limit=args.limit,
+        )
+    except Exception as e:
+        print(f"  ❌ Error: {e}")
+        return
+
+    items = resp.get("configurationItems", [])
+    if not items:
+        print("  No history found for this resource.")
+        return
+
+    # Build temporal nodes — one node per configuration snapshot
+    nodes = []
+    edges = []
+    prev_node_id = None
+
+    for i, item in enumerate(items):
+        capture_time = item.get("configurationItemCaptureTime", "")
+        # Format timestamp for ID
+        ts_str = str(capture_time).replace(" ", "T")[:19] if capture_time else f"t{i}"
+
+        arn = item.get("arn", f"{args.resource_type}/{args.resource_id}")
+        node_id = f"{arn}@{ts_str}"
+
+        # Parse configuration
+        config = item.get("configuration", "")
+        if isinstance(config, str):
+            try:
+                config = json.loads(config)
+            except (json.JSONDecodeError, TypeError):
+                config = {}
+
+        status = item.get("configurationItemStatus", "OK")
+        state_map = {"OK": "ACTIVE", "ResourceDiscovered": "DISCOVERED", "ResourceDeleted": "DELETED"}
+        state = state_map.get(status, status)
+
+        node = {
+            "id": node_id,
+            "node_type": args.resource_type,
+            "name": item.get("resourceName", args.resource_id),
+            "stable_id": f"aws|{account_id}|{args.region}|{args.resource_type}|{args.resource_id}@{ts_str}",
+            "semantic_hash": item.get("configurationItemMD5Hash", ""),
+            "provider": "aws",
+            "account_id": account_id,
+            "region": item.get("awsRegion", args.region),
+            "resource_type": args.resource_type,
+            "state": state,
+            "configuration_capture_time": str(capture_time),
+            "configuration_state_id": item.get("configurationStateId", ""),
+            "version": f"v{len(items) - i}",
+        }
+
+        # Add configuration properties
+        if isinstance(config, dict):
+            for k, v in config.items():
+                if isinstance(v, (str, int, float, bool)) and k not in node:
+                    node[k] = v
+
+        # Extract relationships from this snapshot
+        for rel in item.get("relationships", []):
+            if isinstance(rel, dict) and rel.get("resourceId"):
+                edges.append({
+                    "source_id": node_id,
+                    "target_id": rel.get("resourceId", ""),
+                    "edge_type": rel.get("relationshipName", "RELATED_TO").upper().replace(" ", "_"),
+                    "stable_id": f"aws|{account_id}|EDGE|{rel.get('relationshipName', '')}|{args.resource_id}→{rel.get('resourceId', '')}@{ts_str}",
+                    "snapshot_time": str(capture_time),
+                })
+
+        nodes.append(node)
+
+        # Add temporal edge: this_version → previous_version
+        if prev_node_id:
+            edges.append({
+                "source_id": node_id,
+                "target_id": prev_node_id,
+                "edge_type": "CHANGED_TO",
+                "stable_id": f"aws|{account_id}|EDGE|CHANGED_TO|{args.resource_id}@{ts_str}→prev",
+            })
+        prev_node_id = node_id
+
+    # Write output
+    out = Path(args.output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    with open(out / "nodes.json", "w") as f:
+        json.dump(nodes, f, indent=2, default=str)
+    with open(out / "edges.json", "w") as f:
+        json.dump(edges, f, indent=2, default=str)
+
+    print(f"  ✅ {len(nodes)} snapshots, {len(edges)} edges (temporal + relationship)")
+    print(f"  📁 {out}/nodes.json")
+    print(f"  📁 {out}/edges.json")
+    print(f"\n  Timeline:")
+    for n in nodes:
+        print(f"    {n['version']}  {n['configuration_capture_time'][:19]}  [{n['state']}]  hash={n['semantic_hash'][:8]}")
 
 
 if __name__ == "__main__":
