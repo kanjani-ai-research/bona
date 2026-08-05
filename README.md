@@ -1,14 +1,8 @@
 # Bona
 
-[![PyPI version](https://img.shields.io/pypi/v/bona.svg)](https://pypi.org/project/bona/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+**The Joern for cloud** — builds an Asset Property Graph from AWS Config and exports Joern-compatible `nodes.json` + `edges.json`.
 
-**Infrastructure asset graph — the Joern for cloud.**
-
-Discovers, maps, and graphs CSP resources via AWS Config.
-Produces nodes + edges that feed into Neptune for compliance analysis, impact assessment, and risk scoring.
-
-> **Standalone package. No dependency on graphrag-toolkit.**
+Bona discovers your cloud infrastructure via AWS Config's advanced SQL queries and produces a typed property graph that can be loaded into [Joern](https://joern.io), [Amazon Neptune](https://aws.amazon.com/neptune/), the [GraphRAG Toolkit](https://github.com/awslabs/graphrag-toolkit), or any tool that consumes the document-graph format.
 
 ## Installation
 
@@ -16,82 +10,256 @@ Produces nodes + edges that feed into Neptune for compliance analysis, impact as
 pip install bona
 ```
 
-## Dependencies
-
-Bona has minimal dependencies:
-- `boto3>=1.35.0` — AWS SDK for resource discovery
-- `pydantic>=2.0` — Data validation and schema models
-
-Bona is a standalone package. It does not depend on `graphrag-document-graph`, `graphrag-codeproperty-graph`, or `graphrag-toolkit-lexical-graph`.
+Requires Python 3.11+ and valid AWS credentials with `config:SelectResourceConfig` permissions.
 
 ## Quick Start
 
+### Export — full infrastructure graph
+
 ```bash
-# Discover all resources in an account
-bona discover --account 123456789012 --region us-east-1
+# Export all resources in a region
+bona export --profile myprofile --region us-east-1
 
-# Enumerate AWS services (for recipe generation)
-bona services
+# Filter to specific resource types (supports globs)
+bona export --profile myprofile --region us-east-1 --types "AWS::EC2::*,AWS::S3::*"
 
-# Check compliance state
-bona compliance --account 123456789012
+# Multi-region export
+bona export --profile myprofile --region us-east-1,us-west-2,eu-west-1
+
+# Multi-account via aggregator
+bona export --profile myprofile --region us-east-1 --aggregator MyOrgAggregator
+
+# Include compliance findings as graph nodes
+bona export --profile myprofile --region us-east-1 --include-compliance
+
+# Upload to S3
+bona export --profile myprofile --region us-east-1 --s3-uri s3://my-bucket/apg/
 ```
 
-## Python API
+### History — temporal graph (config changes over time)
 
-```python
-from bona import AWSProvider, DiscoveryPipeline
+```bash
+# Get configuration history for a specific resource
+bona history --profile myprofile --region us-east-1 \
+  --resource-type AWS::EC2::Instance \
+  --resource-id i-0abc123def456
 
-provider = AWSProvider(account_id="123456789012", region="us-east-1")
-result = provider.discover()
-
-print(result.summary())
-# → Discovered 142 resources, 287 relationships, 3 findings in 4521ms
-
-for resource in result.resources:
-    print(f"{resource.resource_type}: {resource.name}")
-
-for edge in result.relationships:
-    print(f"{edge.source_id} --{edge.edge_type}--> {edge.target_id}")
+# Limit to last 5 snapshots
+bona history --profile myprofile --region us-east-1 \
+  --resource-type AWS::S3::Bucket \
+  --resource-id my-bucket-name \
+  --limit 5
 ```
+
+### Types — list tracked resource types
+
+```bash
+# Show all resource types tracked by AWS Config in a region
+bona types --profile myprofile --region us-east-1
+```
+
+## CLI Reference
+
+```
+bona [--verbose] <command> [options]
+
+Global:
+  --verbose, -v         Enable debug logging
+
+Commands:
+  export                Export Asset Property Graph (nodes.json + edges.json)
+  history               Export temporal graph — resource config over time
+  types                 List resource types tracked by AWS Config
+```
+
+### `bona export`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--profile` | (default) | AWS profile name from ~/.aws/credentials |
+| `--region` | us-east-1 | AWS region (comma-separated for multi-region) |
+| `--output-dir` | ./bona-output | Local output directory |
+| `--s3-uri` | | S3 URI for upload (e.g. `s3://bucket/prefix/`) |
+| `--types` | (all) | Resource type filter (comma-separated, globs supported) |
+| `--max-resources` | 10000 | Safety cap on total resources |
+| `--include-compliance` | false | Include Config rule compliance findings as nodes |
+| `--aggregator` | | Config aggregator name for multi-account queries |
+
+### `bona history`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--profile` | (default) | AWS profile name |
+| `--region` | us-east-1 | AWS region |
+| `--resource-type` | (required) | Resource type (e.g. `AWS::EC2::Instance`) |
+| `--resource-id` | (required) | Resource ID |
+| `--limit` | 20 | Max history items |
+| `--output-dir` | ./bona-output | Local output directory |
+
+### `bona types`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--profile` | (default) | AWS profile name |
+| `--region` | us-east-1 | AWS region |
+
+## Output Format
+
+Bona produces two files: `nodes.json` and `edges.json` (plus a `manifest.json` summary).
+
+### nodes.json
+
+Each node is a flat JSON object representing an AWS resource:
+
+```json
+[
+  {
+    "id": "arn:aws:ec2:us-east-1:123456789012:instance/i-0abc123def456",
+    "node_type": "AWS::EC2::Instance",
+    "name": "web-server-1",
+    "stable_id": "aws|123456789012|us-east-1|AWS::EC2::Instance|i-0abc123def456",
+    "semantic_hash": "a1b2c3d4e5f6g7h8",
+    "provider": "aws",
+    "account_id": "123456789012",
+    "region": "us-east-1",
+    "resource_type": "AWS::EC2::Instance",
+    "state": "ACTIVE",
+    "tags": {"Name": "web-server-1", "Environment": "production"},
+    "configuration_capture_time": "2026-08-05T12:00:00Z",
+    "instanceType": "t3.medium",
+    "vpcId": "vpc-abc123",
+    "subnetId": "subnet-def456",
+    "imageId": "ami-0123456789abcdef0"
+  }
+]
+```
+
+Key fields:
+- **id** — ARN (globally unique identifier)
+- **node_type** — AWS resource type (e.g. `AWS::EC2::Instance`)
+- **stable_id** — deterministic identity for delta reconciliation across runs
+- **semantic_hash** — SHA-256 of configuration; detects config drift
+- **state** — `ACTIVE`, `DELETED`, or `DISCOVERED`
+- All configuration properties are flattened to top-level keys (Joern style)
+
+### edges.json
+
+Each edge represents a relationship between resources:
+
+```json
+[
+  {
+    "source_id": "arn:aws:ec2:us-east-1:123456789012:instance/i-0abc123",
+    "target_id": "arn:aws:ec2:us-east-1:123456789012:security-group/sg-xyz789",
+    "edge_type": "IS_ASSOCIATED_WITH",
+    "stable_id": "aws|123456789012|EDGE|IS_ASSOCIATED_WITH|i-0abc123→sg-xyz789"
+  }
+]
+```
+
+Edge types include:
+- `IS_CONTAINED_IN`, `CONTAINS` — hierarchy (subnet in VPC)
+- `IS_ATTACHED_TO` — resource attachments (volume to instance)
+- `IS_ASSOCIATED_WITH` — associations (security group to instance)
+- `IN_VPC`, `IN_SUBNET` — inferred from configuration properties
+- `USES_ROLE`, `ENCRYPTED_BY` — inferred from IAM/KMS references
+- `ROUTES_TO`, `ATTACHED_TO`, `IN_CLUSTER` — inferred from ARN references
+- `CHANGED_TO` — temporal edges (history command)
 
 ## Architecture
 
 ```
-AWS Config (already running) → Bona reads → normalizes → outputs graph schema
-                                                              ↓
-                                                    Neptune (via AI-LENS)
+┌─────────────────────────────────────────────────────────────────────┐
+│                            bona CLI                                  │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌─────────┐     ┌──────────────────┐     ┌───────────────────┐   │
+│  │  CLI    │────▶│   AWSProvider    │────▶│    Exporter       │   │
+│  │ (args)  │     │                  │     │                   │   │
+│  └─────────┘     │  1. Enumerate    │     │  • nodes.json     │   │
+│                  │     types        │     │  • edges.json     │   │
+│                  │  2. SQL query    │     │  • manifest.json   │   │
+│                  │     each type    │     │  • (S3 upload)    │   │
+│                  │  3. Extract      │     └───────────────────┘   │
+│                  │     relationships│                              │
+│                  │  4. Infer edges  │                              │
+│                  │  5. Compliance   │                              │
+│                  └──────────────────┘                              │
+│                           │                                        │
+│                           ▼                                        │
+│                  ┌──────────────────┐                              │
+│                  │  Schema/Model    │                              │
+│                  │                  │                              │
+│                  │  • AssetNode     │                              │
+│                  │  • AssetEdge     │                              │
+│                  │  • DiscoveryResult│                             │
+│                  └──────────────────┘                              │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      AWS Config APIs                                 │
+│                                                                     │
+│  • select_resource_config (SQL)     — primary discovery method     │
+│  • select_aggregate_resource_config — multi-account via aggregator │
+│  • list_discovered_resources        — fallback enumeration         │
+│  • batch_get_resource_config        — fallback detail fetch        │
+│  • get_resource_config_history      — temporal graph (history cmd) │
+│  • describe_compliance_by_resource  — compliance findings          │
+│  • describe_config_rules            — rule metadata enrichment     │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                   Downstream Consumers                               │
+│                                                                     │
+│  • Joern / joern-cpg           (nodes.json + edges.json)           │
+│  • Amazon Neptune              (bulk load / document-graph)         │
+│  • GraphRAG Toolkit            (graph-augmented retrieval)          │
+│  • Neo4j / any property graph  (via JSON import)                   │
+│  • Custom analytics            (jq, pandas, etc.)                  │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-Bona is thin. AWS Config does the heavy lifting. Bona just transforms the output
-into a graph schema compatible with the GraphRAG Toolkit ecosystem.
+## Multi-Account via Aggregator
 
-## Package Structure
+Use the `--aggregator` flag to query across multiple AWS accounts and regions using an [AWS Config Aggregator](https://docs.aws.amazon.com/config/latest/developerguide/aggregate-data.html):
 
-```
-bona/
-  ├── providers/        AWS, Azure, GCP, Application adapters
-  │   └── aws/          AWS Config + Resource Explorer + Inspector
-  ├── pipeline/         discover → transform → load → enrich
-  ├── schema/           AssetNode, AssetEdge, DiscoveryResult
-  ├── query/            graph traversal, compliance, impact analysis
-  └── cli.py            standalone CLI tool
+```bash
+bona export --profile management --region us-east-1 --aggregator MyOrgAggregator
 ```
 
-## Dependency Chain
+This uses `select_aggregate_resource_config` instead of `select_resource_config`, returning resources from all accounts enrolled in the aggregator. Each node retains its original `account_id` and `region`.
 
-```
-bona (standalone)
-├── boto3>=1.35.0
-└── pydantic>=2.0
-```
+See [docs/multi-account.md](docs/multi-account.md) for aggregator setup instructions.
 
-Bona is independent. It produces graph-compatible output but does not import or require any graphrag packages.
+## Compatibility
 
-## Contributing
+| Consumer | How to use |
+|----------|-----------|
+| **Joern** | Load `nodes.json` + `edges.json` directly — schema matches `cpg_exporter.py` format |
+| **Amazon Neptune** | Bulk load via `neptune-export` or convert to CSV with provided scripts |
+| **GraphRAG Toolkit** | Feed `nodes.json` as document-graph source for graph-augmented RAG |
+| **Neo4j** | Import JSON via `apoc.load.json` or convert to Cypher |
+| **document-graph** | Native format — flat JSON nodes with typed edges |
+| **jq / pandas** | Standard JSON — pipe through `jq` or load with `pd.read_json()` |
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and PR guidelines.
+## Requirements
+
+- Python 3.11+
+- AWS credentials with permissions:
+  - `config:SelectResourceConfig`
+  - `config:SelectAggregateResourceConfig` (if using `--aggregator`)
+  - `config:GetResourceConfigHistory` (for `history` command)
+  - `config:DescribeComplianceByResource` (if using `--include-compliance`)
+  - `config:DescribeConfigRules` (if using `--include-compliance`)
+  - `sts:GetCallerIdentity`
+  - `s3:PutObject` (if using `--s3-uri`)
+- AWS Config recorder must be enabled in target region(s)
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT
