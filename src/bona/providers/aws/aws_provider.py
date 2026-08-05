@@ -75,6 +75,7 @@ class AWSProvider:
         self.resource_type_filter = resource_types
         self.include_compliance = include_compliance
         self.aggregator = aggregator
+        self.refresh_cache = False
 
         session_kwargs = {"region_name": region}
         if profile:
@@ -116,7 +117,15 @@ class AWSProvider:
         inferred = self._infer_edges(all_nodes)
         all_edges.extend(inferred)
 
-        # 4. Optional compliance findings
+        # 4. Enrich EC2 nodes with instance type hardware specs (soft/hard inquiry)
+        from bona.enrichment.instance_types import enrich_ec2_nodes
+        all_nodes, ref_nodes, instance_of_edges = enrich_ec2_nodes(
+            all_nodes, self._session, self.region, refresh_cache=self.refresh_cache
+        )
+        all_nodes.extend(ref_nodes)
+        all_edges.extend(instance_of_edges)
+
+        # 5. Optional compliance findings
         findings = []
         if self.include_compliance:
             findings = self._get_compliance_findings()

@@ -32,6 +32,12 @@ def main():
     export_parser.add_argument("--max-resources", type=int, default=10000, help="Safety cap on resources (default: 10000)")
     export_parser.add_argument("--include-compliance", action="store_true", help="Include Config rule compliance findings as nodes")
     export_parser.add_argument("--aggregator", default="", help="Config aggregator name for multi-account queries")
+    export_parser.add_argument("--refresh-cache", action="store_true", help="Force refresh of cached data (instance types, etc.) from AWS")
+
+    # cache command
+    cache_parser = subparsers.add_parser("cache", help="Pre-populate local cache (instance types, etc.)")
+    cache_parser.add_argument("--profile", default="", help="AWS profile name")
+    cache_parser.add_argument("--region", default="us-east-1", help="AWS region")
 
     # history command
     history_parser = subparsers.add_parser("history", help="Export temporal graph — resource config over time")
@@ -67,6 +73,8 @@ def main():
         _do_types(args)
     elif args.command == "history":
         _do_history(args)
+    elif args.command == "cache":
+        _do_cache(args)
 
 
 def _do_export(args):
@@ -99,6 +107,7 @@ def _do_export(args):
             include_compliance=args.include_compliance,
             aggregator=args.aggregator,
         )
+        provider.refresh_cache = args.refresh_cache
 
         result = provider.discover()
         all_results.append(result)
@@ -141,6 +150,29 @@ def _do_types(args):
     for t in sorted(types):
         print(f"  {t}")
     print(f"\nTotal: {len(types)} types")
+
+
+def _do_cache(args):
+    """Pre-populate local caches (instance types, etc.)."""
+    import boto3
+    from .enrichment.instance_types import get_instance_types
+    from .cache import CACHE_DIR
+
+    session_kwargs = {"region_name": args.region}
+    if args.profile:
+        session_kwargs["profile_name"] = args.profile
+    session = boto3.Session(**session_kwargs)
+
+    print(f"\n  Bona — Cache Population")
+    print(f"  Profile: {args.profile or '(default)'}")
+    print(f"  Region:  {args.region}")
+    print(f"  Cache:   {CACHE_DIR}")
+    print()
+
+    # Instance types
+    types = get_instance_types(session, args.region, refresh=True)
+    print(f"  ✅ Instance types: {len(types)} definitions cached")
+    print(f"  📁 {CACHE_DIR}/instance-types-{args.region}.json")
 
 
 def _do_history(args):
