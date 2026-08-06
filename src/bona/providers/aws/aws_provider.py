@@ -78,6 +78,7 @@ class AWSProvider:
         self.refresh_cache = False
         self.validate_schemas = False
         self.enrichment_config = None  # Set from BonaConfig
+        self.learn_mode = False  # Update graph schema from discoveries
 
         session_kwargs = {"region_name": region}
         if profile:
@@ -134,6 +135,13 @@ class AWSProvider:
         findings = []
         if self.include_compliance:
             findings = self._get_compliance_findings()
+
+        # 6. Learn mode — update graph schema from discoveries
+        if self.learn_mode:
+            from bona.graph_schema import load_graph_schema, save_graph_schema, learn_from_discovery
+            graph_schema = load_graph_schema()
+            graph_schema = learn_from_discovery(graph_schema, all_nodes, all_edges)
+            save_graph_schema(graph_schema)
 
         duration = int((time.time() - t0) * 1000)
 
@@ -221,9 +229,14 @@ class AWSProvider:
     # ------------------------------------------------------------------
 
     def _query_resource_type(self, resource_type: str) -> tuple[list[AssetNode], list[AssetEdge]]:
-        """Query all resources of a type using Config advanced query SQL."""
+        """Query all resources of a type using Config advanced query SQL.
+
+        If SQL returns resources with empty configuration, backfills via
+        batch_get_resource_config which always has the full data.
+        """
         nodes = []
         edges = []
+        empty_config_ids = []  # Track resources needing backfill
 
         sql = f"SELECT * WHERE resourceType = '{resource_type}'"
 
@@ -253,6 +266,14 @@ class AWSProvider:
                     except (json.JSONDecodeError, TypeError):
                         continue
 
+                    # Check if configuration is empty (SQL lag for new types)
+                    config = item.get("configuration", "")
+                    if not config or config == "{}" or config == "null":
+                        rid = item.get("resourceId", "")
+                        if rid:
+                            empty_config_ids.append(rid)
+                            continue
+
                     node = self._item_to_node(item)
                     if node:
                         nodes.append(node)
@@ -275,6 +296,14 @@ class AWSProvider:
                 logger.debug("Advanced query failed for %s, trying fallback: %s", resource_type, e)
                 return self._fallback_query(resource_type)
             logger.warning("Query failed for %s: %s", resource_type, e)
+
+        # Backfill: SQL returned empty configs, use batch_get for full data
+        if empty_config_ids:
+            logger.debug("Backfilling %d resources with empty config via batch_get: %s",
+                         len(empty_config_ids), resource_type)
+            backfill_nodes, backfill_edges = self._batch_get_resources(resource_type, empty_config_ids)
+            nodes.extend(backfill_nodes)
+            edges.extend(backfill_edges)
 
         return nodes, edges
 
@@ -656,6 +685,39 @@ class AWSProvider:
                     edges.extend(item_edges)
         except ClientError as e:
             logger.debug("Fallback query failed for %s: %s", resource_type, e)
+        return nodes, edges
+
+    def _batch_get_resources(self, resource_type: str, resource_ids: list[str]) -> tuple[list[AssetNode], list[AssetEdge]]:
+        """Fetch full config for specific resource IDs via batch_get_resource_config.
+
+        Used to backfill resources where SQL returned empty configuration.
+        Processes in batches of 100 (API limit).
+        """
+        nodes = []
+        edges = []
+
+        # batch_get_resource_config accepts max 100 keys per call
+        for i in range(0, len(resource_ids), 100):
+            batch = resource_ids[i:i + 100]
+            keys = [{"resourceType": resource_type, "resourceId": rid} for rid in batch]
+
+            try:
+                resp = self._config.batch_get_resource_config(resourceKeys=keys)
+                for item in resp.get("baseConfigurationItems", []):
+                    node = self._item_to_node(item)
+                    if node:
+                        nodes.append(node)
+                    item_edges = self._extract_relationships(item)
+                    edges.extend(item_edges)
+            except ClientError as e:
+                logger.warning("batch_get_resource_config failed for %s: %s", resource_type, e)
+
+            if i + 100 < len(resource_ids):
+                time.sleep(_THROTTLE_DELAY)
+
+        if nodes:
+            logger.info("  Backfilled %s: %d resources, %d edges via batch_get",
+                        resource_type, len(nodes), len(edges))
         return nodes, edges
 
     # ------------------------------------------------------------------

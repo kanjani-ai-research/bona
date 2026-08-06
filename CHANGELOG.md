@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--config` global flag for explicit config file path
 - Supplemental data provider registry (EC2 instance specs as first provider)
 - S3 upload support for type schema cache (`bona schema --s3-uri`)
+- Graph schema with learn mode (`--learn`) — auto-maintains node/edge type registry at `~/.bona/graph-schema.json`
+- Semver versioning on graph schema (MINOR for new types/pairs, PATCH for observation updates)
+- Config backfill — automatically uses `batch_get_resource_config` when SQL query returns empty configurations
 
 ### Changed
 

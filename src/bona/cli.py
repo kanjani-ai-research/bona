@@ -35,6 +35,7 @@ def main():
     export_parser.add_argument("--aggregator", default="", help="Config aggregator name for multi-account queries")
     export_parser.add_argument("--refresh-cache", action="store_true", help="Force refresh of cached data (instance types, etc.) from AWS")
     export_parser.add_argument("--enrich", nargs="?", const="soft", choices=["soft", "hard"], default=None, help="Enrich nodes with type schema validation (soft=cached, hard=re-fetch). Default: disabled. If flag given without value: soft")
+    export_parser.add_argument("--learn", action="store_true", help="Learn mode: update graph schema (node/edge types) from discoveries")
 
     # cache command
     cache_parser = subparsers.add_parser("cache", help="Pre-populate local cache (instance types, etc.)")
@@ -141,6 +142,9 @@ def _do_export(args):
             provider.enrichment_config = cfg.enrichment
             if cfg.enrichment.mode == "hard":
                 provider.refresh_cache = True
+
+        # Learn mode
+        provider.learn_mode = args.learn
 
         result = provider.discover()
         all_results.append(result)

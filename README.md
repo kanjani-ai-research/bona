@@ -122,6 +122,51 @@ schema_cache:
 
 Place as `./bona.yaml` (project-local), `~/.bona/config.yaml` (user-level), or pass `--config path/to/bona.yaml`.
 
+### Learn Mode — evolving graph schema
+
+Learn mode maintains a **versioned schema** of every node type and edge type Bona has ever observed. Each export run updates the schema with new types, properties, and relationship pairs — so over time you get a complete picture of your graph's shape without manual maintenance.
+
+```bash
+# Learn from an export (writes/updates ~/.bona/graph-schema.json)
+bona export --profile myprofile --region us-east-1 --learn
+
+# Combine with enrichment
+bona export --profile myprofile --region us-east-1 --enrich --learn
+```
+
+The schema lives at **`~/.bona/graph-schema.json`** (configurable via `schema.path` in `bona.yaml`).
+
+**Semver auto-bumping:**
+- **MINOR** bump — new node types, edge types, or relationship pairs discovered
+- **PATCH** bump — only observation counts/timestamps updated
+
+**Example** — what the schema captures:
+
+```json
+{
+  "version": "0.3.0",
+  "last_updated": "2026-08-06T12:00:00Z",
+  "node_types": {
+    "AWS::EC2::Instance": {
+      "observed_properties": ["imageId", "instanceType", "subnetId", "vpcId"],
+      "observed_count": 42,
+      "first_seen": "2026-08-01T10:00:00Z",
+      "last_seen": "2026-08-06T12:00:00Z"
+    }
+  },
+  "edge_types": {
+    "IS_CONTAINED_IN": {
+      "observed_pairs": [
+        {"source_type": "AWS::EC2::Subnet", "target_type": "AWS::EC2::VPC"}
+      ],
+      "observed_count": 15
+    }
+  }
+}
+```
+
+See [docs/graph-schema.md](docs/graph-schema.md) for full details.
+
 ## CLI Reference
 
 ```
@@ -152,6 +197,7 @@ Commands:
 | `--include-compliance` | false | Include Config rule compliance findings as nodes |
 | `--aggregator` | | Config aggregator name for multi-account queries |
 | `--enrich` | disabled | Enable type schema enrichment (`soft` or `hard`). If flag given without value: `soft` |
+| `--learn` | false | Update graph schema with discovered node/edge types (writes `~/.bona/graph-schema.json`) |
 | `--refresh-cache` | false | Force refresh of all cached data from AWS |
 
 ### `bona schema`
