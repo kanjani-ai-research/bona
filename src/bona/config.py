@@ -136,6 +136,30 @@ class GraphSchemaConfig:
 
 
 @dataclass
+class LLMTaskConfig:
+    """Model override per task."""
+
+    classify: str = ""
+    validate: str = ""
+    describe: str = ""
+
+
+@dataclass
+class LLMConfig:
+    """Controls LLM enrichment behavior."""
+
+    enabled: bool = True
+    model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    region: str = ""  # empty = use export region
+    max_nodes_per_batch: int = 20
+    max_candidates_per_call: int = 10
+    temperature: float = 0.0
+    budget_max_calls: int = 10
+    system_prompt: str = "You are an AWS infrastructure analyst specializing in resource relationships and graph topology."
+    tasks: LLMTaskConfig = field(default_factory=LLMTaskConfig)
+
+
+@dataclass
 class BonaConfig:
     """Top-level configuration."""
 
@@ -144,6 +168,7 @@ class BonaConfig:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     schema_cache: SchemaCacheConfig = field(default_factory=SchemaCacheConfig)
     graph_schema: GraphSchemaConfig = field(default_factory=GraphSchemaConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
 
     @classmethod
     def from_dict(cls, data: dict) -> "BonaConfig":
@@ -181,7 +206,25 @@ class BonaConfig:
             path=graph_schema_data.get("path", ""),
         )
 
-        return cls(enrichment=enrichment, output=output, logging=log_cfg, schema_cache=schema_cache, graph_schema=graph_schema)
+        llm_data = data.get("llm", {})
+        tasks_data = llm_data.get("tasks", {})
+        llm_cfg = LLMConfig(
+            enabled=llm_data.get("enabled", True),
+            model_id=llm_data.get("model_id", "us.anthropic.claude-sonnet-4-5-20250929-v1:0"),
+            region=llm_data.get("region", ""),
+            max_nodes_per_batch=llm_data.get("max_nodes_per_batch", 20),
+            max_candidates_per_call=llm_data.get("max_candidates_per_call", 10),
+            temperature=llm_data.get("temperature", 0.0),
+            budget_max_calls=llm_data.get("budget_max_calls", 10),
+            system_prompt=llm_data.get("system_prompt", LLMConfig.system_prompt),
+            tasks=LLMTaskConfig(
+                classify=tasks_data.get("classify", ""),
+                validate=tasks_data.get("validate", ""),
+                describe=tasks_data.get("describe", ""),
+            ),
+        )
+
+        return cls(enrichment=enrichment, output=output, logging=log_cfg, schema_cache=schema_cache, graph_schema=graph_schema, llm=llm_cfg)
 
     @classmethod
     def default(cls) -> "BonaConfig":

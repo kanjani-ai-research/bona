@@ -83,6 +83,7 @@ class AWSProvider:
         self._graph_schema_s3_uri = ""  # S3 URI for upload
         self._profile = profile  # Store for S3 uploads
         self.llm_enrich = False  # Use LLM to classify/validate/describe
+        self._llm_config = None  # LLMConfig from bona.yaml
 
         session_kwargs = {"region_name": region}
         if profile:
@@ -173,6 +174,7 @@ class AWSProvider:
             rules = load_relationship_rules()
             rules, llm_edges, descriptions = llm_enrich(
                 self._session, self.region, all_nodes, rules,
+                config=self._llm_config,
             )
             all_edges.extend(llm_edges)
             save_relationship_rules(rules)

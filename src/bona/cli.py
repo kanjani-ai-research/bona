@@ -152,6 +152,8 @@ def _do_export(args):
 
         # LLM enrichment
         provider.llm_enrich = args.llm_enrich
+        if args.llm_enrich:
+            provider._llm_config = cfg.llm
 
         result = provider.discover()
         all_results.append(result)

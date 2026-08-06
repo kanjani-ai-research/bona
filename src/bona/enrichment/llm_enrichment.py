@@ -39,15 +39,20 @@ MAX_CANDIDATES_PER_CALL = 10
 # ==================================================================
 
 
-def _call_bedrock(session: boto3.Session, region: str, model_id: str, prompt: str) -> Optional[str]:
+def _call_bedrock(session: boto3.Session, region: str, model_id: str, prompt: str,
+                  temperature: float = 0.0, system_prompt: str = "") -> Optional[str]:
     """Call Bedrock converse API and return the text response."""
     try:
         client = session.client("bedrock-runtime", region_name=region)
-        resp = client.converse(
-            modelId=model_id,
-            messages=[{"role": "user", "content": [{"text": prompt}]}],
-            inferenceConfig={"maxTokens": 4096, "temperature": 0.0},
-        )
+        kwargs = {
+            "modelId": model_id,
+            "messages": [{"role": "user", "content": [{"text": prompt}]}],
+            "inferenceConfig": {"maxTokens": 4096, "temperature": temperature},
+        }
+        if system_prompt:
+            kwargs["system"] = [{"text": system_prompt}]
+
+        resp = client.converse(**kwargs)
         output = resp.get("output", {}).get("message", {}).get("content", [])
         for block in output:
             if "text" in block:
@@ -84,17 +89,17 @@ def classify_properties(
     region: str,
     nodes: list[AssetNode],
     model_id: str = DEFAULT_MODEL_ID,
+    max_batch: int = MAX_NODES_PER_BATCH,
+    temperature: float = 0.0,
+    system_prompt: str = "",
 ) -> list[dict]:
-    """Ask LLM to classify node properties as relationships or attributes.
-
-    Returns list of {"source_type", "property_name", "is_relationship", "target_type", "edge_type", "confidence"}
-    """
+    """Ask LLM to classify node properties as relationships or attributes."""
     # Sample diverse nodes (one per type, up to batch limit)
     seen_types: dict[str, AssetNode] = {}
     for n in nodes:
         if n.node_type not in seen_types and not n.node_type.startswith("AWS::CloudFormation::"):
             seen_types[n.node_type] = n
-        if len(seen_types) >= MAX_NODES_PER_BATCH:
+        if len(seen_types) >= max_batch:
             break
 
     if not seen_types:
@@ -146,14 +151,16 @@ def validate_candidates(
     region: str,
     rules: RelationshipRules,
     model_id: str = DEFAULT_MODEL_ID,
+    max_batch: int = MAX_CANDIDATES_PER_CALL,
+    temperature: float = 0.0,
+    system_prompt: str = "",
 ) -> RelationshipRules:
-    """Ask LLM to validate/correct unpromoted candidates and recently promoted rules."""
+    """Ask LLM to validate/correct unpromoted candidates."""
     candidates = rules.candidates()
     if not candidates:
         return rules
 
-    # Batch candidates
-    batch = candidates[:MAX_CANDIDATES_PER_CALL]
+    batch = candidates[:max_batch]
 
     candidate_data = [
         {
@@ -236,12 +243,11 @@ def generate_descriptions(
     region: str,
     nodes: list[AssetNode],
     model_id: str = DEFAULT_MODEL_ID,
+    max_batch: int = MAX_NODES_PER_BATCH,
+    temperature: float = 0.0,
+    system_prompt: str = "",
 ) -> dict[str, str]:
-    """Generate short descriptions for nodes that don't have one.
-
-    Returns dict mapping node.id → description.
-    """
-    # Find nodes without descriptions
+    """Generate short descriptions for nodes that don't have one."""
     needs_description = [
         n for n in nodes
         if not n.properties.get("description") and n.node_type.startswith("AWS::")
@@ -250,8 +256,7 @@ def generate_descriptions(
     if not needs_description:
         return {}
 
-    # Sample up to batch limit
-    batch = needs_description[:MAX_NODES_PER_BATCH]
+    batch = needs_description[:max_batch]
     node_data = [
         {"id": n.id, "node_type": n.node_type, "name": n.name,
          "properties": {k: v for k, v in list(n.properties.items())[:8]
@@ -294,42 +299,73 @@ def llm_enrich(
     nodes: list[AssetNode],
     rules: RelationshipRules,
     model_id: str = DEFAULT_MODEL_ID,
+    config: Optional["LLMConfig"] = None,
 ) -> tuple[RelationshipRules, list[AssetEdge], dict[str, str]]:
     """Run full LLM enrichment pass.
 
     Returns:
         (updated_rules, new_edges_from_classification, descriptions)
     """
-    logger.info("LLM enrichment starting (model=%s, nodes=%d, candidates=%d)",
-                model_id, len(nodes), len(rules.candidates()))
+    from ..config import LLMConfig
+
+    if config is None:
+        config = LLMConfig()
+
+    if not config.enabled:
+        return rules, [], {}
+
+    # Resolve model per task
+    classify_model = config.tasks.classify or config.model_id
+    validate_model = config.tasks.validate or config.model_id
+    describe_model = config.tasks.describe or config.model_id
+    llm_region = config.region or region
+
+    logger.info("LLM enrichment starting (classify=%s, describe=%s, region=%s, nodes=%d, candidates=%d)",
+                classify_model, describe_model, llm_region, len(nodes), len(rules.candidates()))
 
     new_edges: list[AssetEdge] = []
     descriptions: dict[str, str] = {}
+    calls_made = 0
 
     # 1. Classify properties on nodes
-    classifications = classify_properties(session, region, nodes, model_id)
-    for c in classifications:
-        if c.get("is_relationship") and c.get("confidence", 0) >= 0.7:
-            key = rules._key(c["source_type"], c["property_name"])
-            if key not in rules.rules:
-                rules.rules[key] = RelationshipCandidate(
-                    source_type=c["source_type"],
-                    property_name=c["property_name"],
-                    target_type=c.get("target_type", ""),
-                    edge_type=c.get("edge_type", "REFERENCES"),
-                    pattern="llm-classified",
-                    observed_count=0,
-                    promoted=c.get("confidence", 0) >= 0.9,
-                    first_seen=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                )
+    if calls_made < config.budget_max_calls:
+        classifications = classify_properties(session, llm_region, nodes, classify_model,
+                                              max_batch=config.max_nodes_per_batch,
+                                              temperature=config.temperature,
+                                              system_prompt=config.system_prompt)
+        calls_made += 1
+        for c in classifications:
+            if c.get("is_relationship") and c.get("confidence", 0) >= 0.7:
+                key = rules._key(c["source_type"], c["property_name"])
+                if key not in rules.rules:
+                    rules.rules[key] = RelationshipCandidate(
+                        source_type=c["source_type"],
+                        property_name=c["property_name"],
+                        target_type=c.get("target_type", ""),
+                        edge_type=c.get("edge_type", "REFERENCES"),
+                        pattern="llm-classified",
+                        observed_count=0,
+                        promoted=c.get("confidence", 0) >= 0.9,
+                        first_seen=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    )
 
     # 2. Validate candidates
-    rules = validate_candidates(session, region, rules, model_id)
+    if calls_made < config.budget_max_calls and rules.candidates():
+        rules = validate_candidates(session, llm_region, rules, validate_model,
+                                    max_batch=config.max_candidates_per_call,
+                                    temperature=config.temperature,
+                                    system_prompt=config.system_prompt)
+        calls_made += 1
 
     # 3. Generate descriptions
-    descriptions = generate_descriptions(session, region, nodes, model_id)
+    if calls_made < config.budget_max_calls:
+        descriptions = generate_descriptions(session, llm_region, nodes, describe_model,
+                                             max_batch=config.max_nodes_per_batch,
+                                             temperature=config.temperature,
+                                             system_prompt=config.system_prompt)
+        calls_made += 1
 
-    logger.info("LLM enrichment complete: %d rules, %d descriptions",
-                len(rules.rules), len(descriptions))
+    logger.info("LLM enrichment complete: %d rules, %d descriptions, %d API calls",
+                len(rules.rules), len(descriptions), calls_made)
 
     return rules, new_edges, descriptions
