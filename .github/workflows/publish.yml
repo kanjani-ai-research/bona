@@ -1,18 +1,31 @@
 name: Publish to PyPI
+
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # for trusted publishing
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-      - run: pip install build pytest
-      - run: pytest tests/ -v || true
-      - run: python -m build
-      - uses: pypa/gh-action-pypi-publish@release/v1
+          python-version: '3.11'
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          # Uses trusted publishing (no token needed if configured on PyPI)
+          # Or set PYPI_API_TOKEN as a repo secret
           password: ${{ secrets.PYPI_API_TOKEN }}
