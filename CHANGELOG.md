@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `bona schema` command — download CloudFormation type schemas to local cache
+- `--enrich [soft|hard]` flag on `bona export` — adds TypeDefinition reference nodes + INSTANCE_OF edges
+- Configuration file support (`bona.yaml` / `bona.json`) with include/exclude patterns for enrichment
+- Generic logging module — configurable level and output path (local file or S3)
+- `--config` global flag for explicit config file path
+- Supplemental data provider registry (EC2 instance specs as first provider)
+- S3 upload support for type schema cache (`bona schema --s3-uri`)
+
+### Changed
+
+- Unified enrichment pipeline replaces per-service enrichment files
+- Logging uses structured module (`bona.logging`) instead of print statements
+
 ## [0.1.0] — 2026-08-05
 
 ### Added

@@ -200,3 +200,160 @@ Add the required IAM permissions above.
 ### "InvalidExpression"
 
 Advanced Query might not support a specific SQL syntax in your region. Bona will automatically fall back to the list+batch method. Use `--verbose` to see the fallback in action.
+
+---
+
+## Bona Configuration File
+
+Bona supports a project-level or user-level configuration file (`bona.yaml` or `bona.json`) that controls enrichment behavior, output destinations, logging, and schema caching.
+
+### File Locations (Search Order)
+
+Bona searches for a configuration file in this order:
+
+1. **Explicit path** — `--config path/to/bona.yaml` (CLI flag, highest priority)
+2. **Project-local** — `./bona.yaml`, `./bona.yml`, or `./bona.json` in the current working directory
+3. **User-level** — `~/.bona/config.yaml`, `~/.bona/config.yml`, or `~/.bona/config.json`
+
+The first file found is used. If no configuration file is found, Bona uses built-in defaults (no enrichment, output to `./bona-output`, INFO-level logging to stderr).
+
+### Precedence
+
+**CLI flags always override config file values.** For example:
+
+- `--verbose` forces `DEBUG` logging regardless of `logging.level` in the config file
+- `--output-dir` overrides `output.dir`
+- `--profile` and `--region` override any implicit AWS settings
+
+---
+
+### Full YAML Example
+
+```yaml
+# Bona Configuration
+# Place as ./bona.yaml (project-local) or ~/.bona/config.yaml (user-level)
+# Or specify explicitly: bona --config path/to/bona.yaml export ...
+
+logging:
+  level: INFO                    # DEBUG | INFO | WARNING | ERROR
+  path: ./bona.log              # local file log (optional)
+  # path: s3://my-bucket/logs/  # S3 log upload (flushed at end of run)
+
+enrichment:
+  enabled: true
+  mode: soft                     # soft (use cache) | hard (re-fetch from AWS)
+  include:                       # glob patterns — empty means all types
+    - "AWS::EC2::*"
+    - "AWS::S3::*"
+    - "AWS::Lambda::*"
+    - "AWS::IAM::*"
+    - "AWS::RDS::*"
+  exclude:                       # glob patterns — takes precedence over include
+    - "AWS::CloudFormation::Stack"
+  supplemental:
+    ec2_instance_specs: true      # fetch vCPU/memory/GPU specs for EC2 types
+
+output:
+  dir: ./bona-output
+  s3_uri: s3://my-bucket/apg/   # auto-upload graph output to S3
+
+schema_cache:
+  s3_uri: s3://my-bucket/schemas/  # auto-upload type schemas to S3
+```
+
+---
+
+### Full JSON Example
+
+```json
+{
+  "logging": {
+    "level": "INFO",
+    "path": "./bona.log"
+  },
+  "enrichment": {
+    "enabled": true,
+    "mode": "soft",
+    "include": [
+      "AWS::EC2::*",
+      "AWS::S3::*",
+      "AWS::Lambda::*",
+      "AWS::IAM::*",
+      "AWS::RDS::*"
+    ],
+    "exclude": [
+      "AWS::CloudFormation::Stack"
+    ],
+    "supplemental": {
+      "ec2_instance_specs": true
+    }
+  },
+  "output": {
+    "dir": "./bona-output",
+    "s3_uri": "s3://my-bucket/apg/"
+  },
+  "schema_cache": {
+    "s3_uri": "s3://my-bucket/schemas/"
+  }
+}
+```
+
+---
+
+### Section Reference
+
+#### `logging`
+
+Controls log verbosity and output destination.
+
+| Key     | Type   | Default  | Description |
+|---------|--------|----------|-------------|
+| `level` | string | `INFO`   | Log level: `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
+| `path`  | string | *(empty — stderr only)* | Path for log output. Supports local file paths (e.g., `./bona.log`) or S3 URIs (e.g., `s3://bucket/logs/`). S3 logs are buffered and uploaded at the end of the run. |
+
+> **Note**: The `--verbose` CLI flag forces `DEBUG` level regardless of the config file setting.
+
+#### `enrichment`
+
+Controls which resource types are enriched with additional metadata from AWS CloudFormation schemas.
+
+| Key            | Type    | Default | Description |
+|----------------|---------|---------|-------------|
+| `enabled`      | bool    | `false` | Master switch — set to `true` to enable enrichment |
+| `mode`         | string  | `soft`  | `soft` uses cached schemas when available; `hard` re-fetches from AWS every time |
+| `include`      | list    | `[]` *(all types)* | Glob patterns for types to enrich. An empty list means all discovered types are eligible. |
+| `exclude`      | list    | `[]`    | Glob patterns for types to skip. **Exclude takes precedence over include.** |
+| `supplemental` | object  | `{"ec2_instance_specs": true}` | Feature flags for supplemental enrichment data |
+
+**Glob matching**: Patterns use `fnmatch`-style matching. For example:
+
+- `"AWS::EC2::*"` matches all EC2 resource types
+- `"AWS::S3::Bucket"` matches only S3 Buckets
+- `"AWS::*::*"` matches everything (same as empty include list)
+
+**Evaluation logic**:
+
+1. If `include` is non-empty, the type must match at least one include pattern
+2. If the type matches any `exclude` pattern, it is skipped
+3. Otherwise the type is enriched
+
+#### `output`
+
+Controls where Bona writes its output files (APG graph, schemas, etc.).
+
+| Key      | Type   | Default          | Description |
+|----------|--------|------------------|-------------|
+| `dir`    | string | `./bona-output`  | Local directory for output files |
+| `s3_uri` | string | *(empty)*        | S3 URI prefix for auto-uploading output (e.g., `s3://my-bucket/apg/`) |
+
+When `s3_uri` is set, Bona uploads the output to S3 in addition to writing locally.
+
+#### `schema_cache`
+
+Controls schema cache upload to S3 for sharing across team members or CI/CD.
+
+| Key      | Type   | Default   | Description |
+|----------|--------|-----------|-------------|
+| `s3_uri` | string | *(empty)* | S3 URI prefix for uploading cached type schemas (e.g., `s3://my-bucket/schemas/`) |
+
+When set, Bona uploads fetched CloudFormation type schemas to this S3 location, enabling other runs to use them as a shared cache.

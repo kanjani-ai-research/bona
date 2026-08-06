@@ -19,6 +19,7 @@ def main():
         description="Asset Property Graph — the Joern for cloud infrastructure",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
+    parser.add_argument("--config", default="", help="Path to bona config file (JSON or YAML). Searches ./bona.yaml, ~/.bona/config.yaml if not set")
 
     subparsers = parser.add_subparsers(dest="command")
 
@@ -33,6 +34,7 @@ def main():
     export_parser.add_argument("--include-compliance", action="store_true", help="Include Config rule compliance findings as nodes")
     export_parser.add_argument("--aggregator", default="", help="Config aggregator name for multi-account queries")
     export_parser.add_argument("--refresh-cache", action="store_true", help="Force refresh of cached data (instance types, etc.) from AWS")
+    export_parser.add_argument("--enrich", nargs="?", const="soft", choices=["soft", "hard"], default=None, help="Enrich nodes with type schema validation (soft=cached, hard=re-fetch). Default: disabled. If flag given without value: soft")
 
     # cache command
     cache_parser = subparsers.add_parser("cache", help="Pre-populate local cache (instance types, etc.)")
@@ -53,15 +55,23 @@ def main():
     svc_parser.add_argument("--profile", default="", help="AWS profile name")
     svc_parser.add_argument("--region", default="us-east-1", help="AWS region")
 
+    # schema command (download CloudFormation type schemas to cache, optionally upload to S3)
+    schema_parser = subparsers.add_parser("schema", help="Download CloudFormation type schemas to local cache (and optionally S3)")
+    schema_parser.add_argument("--profile", default="", help="AWS profile name")
+    schema_parser.add_argument("--region", default="us-east-1", help="AWS region")
+    schema_parser.add_argument("--type", dest="type_name", default="", help="Specific resource type (e.g. AWS::S3::Bucket)")
+    schema_parser.add_argument("--types", default="", help="Comma-separated resource types (or 'all' for all Config-tracked types)")
+    schema_parser.add_argument("--s3-uri", default="", help="S3 URI to upload cached schemas (e.g. s3://bucket/schemas/)")
+    schema_parser.add_argument("--validate", default="", help="Validate a nodes.json file against cached type schemas")
+
     args = parser.parse_args()
 
-    # Logging
-    level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    # Load config and configure logging
+    from .config import load_config
+    from .logging import setup_logging, flush_to_s3
+
+    cfg = load_config(args.config or None)
+    setup_logging(config=cfg, cli_verbose=args.verbose, profile="", region="us-east-1")
 
     if not args.command:
         parser.print_help()
@@ -75,12 +85,21 @@ def main():
         _do_history(args)
     elif args.command == "cache":
         _do_cache(args)
+    elif args.command == "schema":
+        _do_schema(args)
+
+    # Flush logs to S3 if configured
+    flush_to_s3()
 
 
 def _do_export(args):
     """Run export: discover → write nodes.json + edges.json."""
     from .providers.aws.aws_provider import AWSProvider
     from .export import export_to_dir, export_to_s3
+    from .config import load_config
+
+    # Load configuration
+    cfg = load_config(args.config or None)
 
     # Parse resource type filter
     type_filter = [t.strip() for t in args.types.split(",") if t.strip()] or None
@@ -109,13 +128,27 @@ def _do_export(args):
         )
         provider.refresh_cache = args.refresh_cache
 
+        # Enrichment: CLI flag overrides config file
+        if args.enrich:
+            provider.validate_schemas = True
+            provider.enrichment_config = cfg.enrichment
+            provider.enrichment_config.enabled = True
+            if args.enrich == "hard":
+                provider.refresh_cache = True
+                provider.enrichment_config.mode = "hard"
+        elif cfg.enrichment.enabled:
+            provider.validate_schemas = True
+            provider.enrichment_config = cfg.enrichment
+            if cfg.enrichment.mode == "hard":
+                provider.refresh_cache = True
+
         result = provider.discover()
         all_results.append(result)
 
-        # Write to local dir (always — default behavior)
-        output_dir = args.output_dir
+        # Write to local dir (CLI flag > config > default)
+        output_dir = args.output_dir if args.output_dir != "./bona-output" else cfg.output.dir
         if len(regions) > 1:
-            output_dir = f"{args.output_dir}/{region}"
+            output_dir = f"{output_dir}/{region}"
 
         manifest = export_to_dir(result, output_dir)
 
@@ -123,13 +156,14 @@ def _do_export(args):
         print(f"  📁 {output_dir}/nodes.json ({manifest['node_count']} nodes)")
         print(f"  📁 {output_dir}/edges.json ({manifest['edge_count']} edges)")
 
-        # Optional S3 upload (only if explicitly configured)
-        if args.s3_uri:
-            s3_prefix = args.s3_uri.rstrip("/")
+        # Optional S3 upload (CLI flag > config)
+        s3_uri = args.s3_uri or cfg.output.s3_uri
+        if s3_uri:
+            s3_prefix = s3_uri.rstrip("/")
             if len(regions) > 1:
                 s3_prefix = f"{s3_prefix}/{region}"
             s3_manifest = export_to_s3(result, s3_prefix, profile=args.profile)
-            print(f"  ☁️  Uploaded to {s3_manifest.get('nodes_s3', args.s3_uri)}")
+            print(f"  ☁️  Uploaded to {s3_manifest.get('nodes_s3', s3_uri)}")
 
     # Summary
     if len(regions) > 1:
@@ -173,6 +207,164 @@ def _do_cache(args):
     types = get_instance_types(session, args.region, refresh=True)
     print(f"  ✅ Instance types: {len(types)} definitions cached")
     print(f"  📁 {CACHE_DIR}/instance-types-{args.region}.json")
+
+
+def _do_schema(args):
+    """Download CloudFormation type schemas to local cache (and optionally S3)."""
+    import boto3
+    from .enrichment.type_schemas import fetch_all_type_schemas, get_type_schema
+    from .cache import CACHE_DIR
+    from .config import load_config
+
+    cfg = load_config(args.config if hasattr(args, 'config') else None)
+
+    session_kwargs = {"region_name": args.region}
+    if args.profile:
+        session_kwargs["profile_name"] = args.profile
+    session = boto3.Session(**session_kwargs)
+
+    # Determine which types to download
+    if args.validate:
+        # Validate mode: load nodes.json and check against cached schemas
+        _do_schema_validate(args, session)
+        return
+
+    type_names = []
+    if args.type_name:
+        type_names = [args.type_name]
+    elif args.types:
+        if args.types == "all":
+            # Enumerate from Config
+            from .providers.aws.aws_provider import AWSProvider
+            provider = AWSProvider(profile=args.profile, region=args.region)
+            type_names = provider._get_resource_types()
+        else:
+            type_names = [t.strip() for t in args.types.split(",") if t.strip()]
+    else:
+        # Default: download common types
+        from .providers.aws.aws_provider import AWSProvider
+        type_names = AWSProvider._COMMON_TYPES
+
+    logger = logging.getLogger(__name__)
+    logger.info("Type Schema Download (hard inquiry) — profile=%s region=%s types=%d cache=%s",
+                args.profile or "(default)", args.region, len(type_names), CACHE_DIR)
+
+    # Always hard inquiry — this command is specifically for populating cache
+    schemas = fetch_all_type_schemas(session, args.region, type_names, refresh=True)
+
+    logger.info("Downloaded %d / %d type schemas", len(schemas), len(type_names))
+    for name in sorted(schemas.keys()):
+        prop_count = len(schemas[name].get("properties", {}))
+        logger.info("  %s (%d properties)", name, prop_count)
+
+    failed = set(type_names) - set(schemas.keys())
+    if failed:
+        logger.warning("%d types not found in CloudFormation registry", len(failed))
+        for name in sorted(failed):
+            logger.warning("  %s", name)
+
+    # Optional S3 upload (CLI flag > config)
+    s3_uri = args.s3_uri or cfg.schema_cache.s3_uri
+    if s3_uri:
+        _upload_schemas_to_s3(schemas, s3_uri, args.region, args.profile)
+
+
+def _do_schema_validate(args, session):
+    """Validate a nodes.json file against cached type schemas."""
+    import json
+    from pathlib import Path
+    from .enrichment.type_schemas import get_type_schema, soft_check
+    from .schema.model import AssetNode
+
+    logger = logging.getLogger(__name__)
+
+    nodes_path = Path(args.validate)
+    if not nodes_path.exists():
+        logger.error("File not found: %s", nodes_path)
+        return
+
+    with open(nodes_path) as f:
+        nodes_data = json.load(f)
+
+    logger.info("Schema Validation (soft check) — file=%s nodes=%d", nodes_path, len(nodes_data))
+
+    valid_count = 0
+    invalid_count = 0
+    no_schema_count = 0
+
+    for node_dict in nodes_data:
+        resource_type = node_dict.get("resource_type", node_dict.get("node_type", ""))
+        if not resource_type.startswith("AWS::"):
+            continue
+
+        schema = get_type_schema(session, args.region, resource_type, refresh=False)
+        if not schema:
+            no_schema_count += 1
+            continue
+
+        # Build a minimal AssetNode for validation
+        node = AssetNode(
+            id=node_dict.get("id", ""),
+            node_type=node_dict.get("node_type", ""),
+            name=node_dict.get("name", ""),
+            resource_type=resource_type,
+            properties={k: v for k, v in node_dict.items() if k not in {
+                "id", "node_type", "name", "stable_id", "semantic_hash",
+                "provider", "account_id", "region", "resource_type", "state", "tags",
+                "configuration_capture_time",
+            }},
+        )
+
+        result = soft_check(node, schema)
+        if result["valid"]:
+            valid_count += 1
+        else:
+            invalid_count += 1
+            logger.warning("%s (%s) — INVALID", node_dict.get('name', node_dict.get('id', '?')), resource_type)
+            if result["missing_required"]:
+                logger.warning("  Missing required: %s", ', '.join(result['missing_required']))
+            if result["unknown_properties"]:
+                logger.warning("  Unknown props: %s", ', '.join(result['unknown_properties'][:5]))
+
+    logger.info("Validation results: valid=%d invalid=%d no_schema=%d", valid_count, invalid_count, no_schema_count)
+
+
+def _upload_schemas_to_s3(schemas: dict, s3_uri: str, region: str, profile: str = ""):
+    """Upload cached schemas to S3."""
+    import json
+    import boto3
+
+    logger = logging.getLogger(__name__)
+
+    # Parse s3://bucket/prefix/
+    if not s3_uri.startswith("s3://"):
+        logger.error("Invalid S3 URI: %s", s3_uri)
+        return
+
+    parts = s3_uri[5:].split("/", 1)
+    bucket = parts[0]
+    prefix = parts[1].rstrip("/") if len(parts) > 1 else ""
+
+    session_kwargs = {"region_name": region}
+    if profile:
+        session_kwargs["profile_name"] = profile
+    session = boto3.Session(**session_kwargs)
+    s3 = session.client("s3")
+
+    uploaded = 0
+    for type_name, schema in schemas.items():
+        safe_name = type_name.replace("::", "--")
+        key = f"{prefix}/{safe_name}.json" if prefix else f"{safe_name}.json"
+
+        s3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=json.dumps(schema, indent=2, default=str),
+            ContentType="application/json",
+        )
+        uploaded += 1
+
+    logger.info("Uploaded %d schemas to s3://%s/%s/", uploaded, bucket, prefix)
 
 
 def _do_history(args):

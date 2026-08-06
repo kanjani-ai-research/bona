@@ -3,14 +3,15 @@
 ## Synopsis
 
 ```
-bona [--verbose] <command> [options]
+bona [--verbose] [--config <path>] <command> [options]
 ```
 
 ## Global Options
 
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--verbose` | `-v` | Enable debug logging (shows API calls, pagination, timing) |
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--verbose` | `-v` | `false` | Enable debug logging (shows API calls, pagination, timing) |
+| `--config` | | (auto) | Path to bona config file (JSON or YAML). Searches `./bona.yaml`, `~/.bona/config.yaml` if not set |
 
 ## Commands
 
@@ -38,6 +39,8 @@ bona export --profile <name> --region <region> [options]
 | `--max-resources` | `10000` | Safety cap on total resources |
 | `--include-compliance` | `false` | Include Config rule compliance findings as nodes |
 | `--aggregator` | | Config Aggregator name for multi-account queries |
+| `--refresh-cache` | `false` | Force refresh of cached data (instance types, etc.) from AWS |
+| `--enrich` | disabled | Enrich nodes with type schema validation. Values: `soft` (cached schemas), `hard` (re-fetch schemas). If flag given without a value, defaults to `soft` |
 
 ### Examples
 
@@ -58,6 +61,12 @@ bona export --profile management --region us-east-1 --aggregator OrgAggregator
 bona export --profile prod --region us-east-1 \
   --include-compliance \
   --s3-uri s3://my-graph-bucket/bona/latest/
+
+# Enrich with cached type schemas (soft)
+bona export --profile prod --region us-east-1 --enrich
+
+# Enrich with forced re-download of type schemas (hard)
+bona export --profile prod --region us-east-1 --enrich hard
 ```
 
 ### Output Structure
@@ -77,6 +86,53 @@ For multi-region, each region gets a subdirectory:
     nodes.json, edges.json, manifest.json
   us-west-2/
     nodes.json, edges.json, manifest.json
+```
+
+---
+
+## `bona schema`
+
+Download CloudFormation type schemas to local cache, optionally upload to S3, or validate a `nodes.json` file against cached schemas.
+
+### Usage
+
+```bash
+bona schema --profile <name> --region <region> [options]
+```
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--profile` | (default) | AWS profile name |
+| `--region` | `us-east-1` | AWS region |
+| `--type` | | Specific resource type to download (e.g. `AWS::S3::Bucket`) |
+| `--types` | | Comma-separated resource types, or `all` for every Config-tracked type |
+| `--s3-uri` | | S3 URI to upload cached schemas (e.g. `s3://bucket/schemas/`) |
+| `--validate` | | Path to a `nodes.json` file to validate against cached type schemas |
+
+If neither `--type` nor `--types` is specified, a default set of common types is downloaded.
+
+### Examples
+
+```bash
+# Download schemas for common types
+bona schema --profile prod --region us-east-1
+
+# Download schema for a single type
+bona schema --profile prod --region us-east-1 --type AWS::S3::Bucket
+
+# Download schemas for all Config-tracked types
+bona schema --profile prod --region us-east-1 --types all
+
+# Download specific types and upload to S3
+bona schema --profile prod --region us-east-1 \
+  --types "AWS::EC2::Instance,AWS::S3::Bucket" \
+  --s3-uri s3://my-bucket/schemas/
+
+# Validate a nodes.json against cached schemas
+bona schema --profile prod --region us-east-1 \
+  --validate ./bona-output/nodes.json
 ```
 
 ---
@@ -149,6 +205,31 @@ Resource types tracked by AWS Config (us-east-1):
   ...
 
 Total: 42 types
+```
+
+---
+
+## `bona cache`
+
+Pre-populate local caches (instance types, pricing data, etc.) from AWS.
+
+### Usage
+
+```bash
+bona cache --profile <name> --region <region>
+```
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--profile` | (default) | AWS profile name |
+| `--region` | `us-east-1` | AWS region |
+
+### Example
+
+```bash
+bona cache --profile prod --region us-east-1
 ```
 
 ---

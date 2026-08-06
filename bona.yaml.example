@@ -1,0 +1,29 @@
+# Bona Configuration
+# Place as ./bona.yaml (project-local) or ~/.bona/config.yaml (user-level)
+# Or specify explicitly: bona --config path/to/bona.yaml export ...
+
+logging:
+  level: INFO                    # DEBUG | INFO | WARNING | ERROR
+  # path: ./bona.log            # local file log (optional)
+  # path: s3://my-bucket/logs/  # S3 log upload (flushed at end of run)
+
+enrichment:
+  enabled: true
+  mode: soft                     # soft (use cache) | hard (re-fetch from AWS)
+  include:                       # glob patterns — empty means all types
+    - "AWS::EC2::*"
+    - "AWS::S3::*"
+    - "AWS::Lambda::*"
+    - "AWS::IAM::*"
+    - "AWS::RDS::*"
+  exclude:                       # glob patterns — takes precedence over include
+    - "AWS::CloudFormation::Stack"
+  supplemental:
+    ec2_instance_specs: true      # fetch vCPU/memory/GPU specs for EC2 types
+
+output:
+  dir: ./bona-output
+  # s3_uri: s3://my-bucket/apg/  # auto-upload graph output to S3
+
+schema_cache:
+  # s3_uri: s3://my-bucket/schemas/  # auto-upload type schemas to S3
