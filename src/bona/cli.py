@@ -36,6 +36,7 @@ def main():
     export_parser.add_argument("--refresh-cache", action="store_true", help="Force refresh of cached data (instance types, etc.) from AWS")
     export_parser.add_argument("--enrich", nargs="?", const="soft", choices=["soft", "hard"], default=None, help="Enrich nodes with type schema validation (soft=cached, hard=re-fetch). Default: disabled. If flag given without value: soft")
     export_parser.add_argument("--learn", action="store_true", help="Learn mode: update graph schema (node/edge types) from discoveries")
+    export_parser.add_argument("--llm-enrich", action="store_true", help="Use Bedrock LLM to classify properties, validate relationships, generate descriptions")
 
     # cache command
     cache_parser = subparsers.add_parser("cache", help="Pre-populate local cache (instance types, etc.)")
@@ -148,6 +149,9 @@ def _do_export(args):
         if args.learn:
             provider._graph_schema_path = cfg.graph_schema.path or ""
             provider._graph_schema_s3_uri = cfg.graph_schema.s3_uri or ""
+
+        # LLM enrichment
+        provider.llm_enrich = args.llm_enrich
 
         result = provider.discover()
         all_results.append(result)

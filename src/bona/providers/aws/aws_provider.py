@@ -82,6 +82,7 @@ class AWSProvider:
         self._graph_schema_path = ""  # Local path override
         self._graph_schema_s3_uri = ""  # S3 URI for upload
         self._profile = profile  # Store for S3 uploads
+        self.llm_enrich = False  # Use LLM to classify/validate/describe
 
         session_kwargs = {"region_name": region}
         if profile:
@@ -164,6 +165,21 @@ class AWSProvider:
             learned_edges = apply_relationship_rules(rules, all_nodes)
             all_edges.extend(learned_edges)
             save_relationship_rules(rules)
+
+        # 7. LLM enrichment — classify properties, validate rules, generate descriptions
+        if self.llm_enrich:
+            from bona.enrichment.llm_enrichment import llm_enrich
+            from bona.relationship_learner import load_relationship_rules, save_relationship_rules
+            rules = load_relationship_rules()
+            rules, llm_edges, descriptions = llm_enrich(
+                self._session, self.region, all_nodes, rules,
+            )
+            all_edges.extend(llm_edges)
+            save_relationship_rules(rules)
+            # Apply descriptions to nodes
+            for node in all_nodes:
+                if node.id in descriptions:
+                    node.properties["_llm_description"] = descriptions[node.id]
 
         duration = int((time.time() - t0) * 1000)
 
