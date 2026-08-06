@@ -259,6 +259,10 @@ output:
 
 schema_cache:
   s3_uri: s3://my-bucket/schemas/  # auto-upload type schemas to S3
+
+graph_schema:
+  s3_uri: s3://my-bucket/graph-schema.json  # upload learned schema to S3
+  # path: ./graph-schema.json               # local path override
 ```
 
 ---
@@ -294,6 +298,10 @@ schema_cache:
   },
   "schema_cache": {
     "s3_uri": "s3://my-bucket/schemas/"
+  },
+  "graph_schema": {
+    "s3_uri": "s3://my-bucket/graph-schema.json",
+    "path": ""
   }
 }
 ```
@@ -357,3 +365,14 @@ Controls schema cache upload to S3 for sharing across team members or CI/CD.
 | `s3_uri` | string | *(empty)* | S3 URI prefix for uploading cached type schemas (e.g., `s3://my-bucket/schemas/`) |
 
 When set, Bona uploads fetched CloudFormation type schemas to this S3 location, enabling other runs to use them as a shared cache.
+
+#### `graph_schema`
+
+Controls graph schema (learn mode) storage and S3 upload.
+
+| Key      | Type   | Default   | Description |
+|----------|--------|-----------|-------------|
+| `s3_uri` | string | *(empty)* | S3 URI for uploading the graph schema (e.g., `s3://my-bucket/graph-schema.json`) |
+| `path`   | string | `~/.bona/graph-schema.json` | Local path override for the graph schema file |
+
+When `s3_uri` is set, the learned graph schema is uploaded to S3 on every `--learn` run. This enables shared team schemas, cross-account visibility, and downstream tool consumption.

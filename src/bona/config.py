@@ -29,6 +29,10 @@ Example bona.yaml:
     schema_cache:
       s3_uri: s3://my-bucket/schemas/
 
+    graph_schema:
+      s3_uri: s3://my-bucket/graph-schema.json
+      # path: ./graph-schema.json
+
 Example bona.json:
 
     {
@@ -51,6 +55,9 @@ Example bona.json:
       },
       "schema_cache": {
         "s3_uri": "s3://my-bucket/schemas/"
+      },
+      "graph_schema": {
+        "s3_uri": "s3://my-bucket/graph-schema.json"
       }
     }
 """

@@ -13,15 +13,40 @@ The schema is persisted as a JSON file:
 | Setting | Value |
 |---------|-------|
 | Default path | `~/.bona/graph-schema.json` |
-| Config override | `schema.path` in `bona.yaml` |
+| Config override | `graph_schema.path` in `bona.yaml` |
+| S3 upload | `graph_schema.s3_uri` in `bona.yaml` |
 
 ```yaml
 # bona.yaml
-schema:
-  path: /path/to/custom/graph-schema.json
+graph_schema:
+  path: /path/to/custom/graph-schema.json     # local path override
+  s3_uri: s3://my-bucket/bona/graph-schema.json  # upload to S3 on every --learn run
 ```
 
 If the file doesn't exist, Bona starts with an empty schema (`v0.1.0`).
+
+### S3 Storage
+
+When `graph_schema.s3_uri` is configured, the schema is uploaded to S3 after every learn run. This enables:
+
+- **Shared team schema** — everyone reads from the same S3 location
+- **Cross-account visibility** — aggregate learned schemas from multiple accounts
+- **Audit trail** — enable S3 versioning to track schema evolution over time
+- **Downstream consumption** — other tools (Neptune, GraphRAG, CI/CD) can read the schema
+
+The S3 URI can be an exact key or a prefix:
+
+```yaml
+# Exact key
+graph_schema:
+  s3_uri: s3://my-bucket/bona/graph-schema.json
+
+# Prefix (appends graph-schema.json)
+graph_schema:
+  s3_uri: s3://my-bucket/bona/schemas/
+```
+
+The local file is always written regardless of S3 configuration.
 
 ## Schema Structure
 
