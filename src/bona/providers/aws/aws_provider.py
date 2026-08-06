@@ -142,6 +142,11 @@ class AWSProvider:
         # 6. Learn mode — update graph schema from discoveries
         if self.learn_mode:
             from bona.graph_schema import load_graph_schema, save_graph_schema, learn_from_discovery
+            from bona.relationship_learner import (
+                load_relationship_rules, save_relationship_rules,
+                learn_relationships, apply_relationship_rules,
+            )
+            # Learn graph schema (node/edge types)
             schema_path = self._graph_schema_path or None
             graph_schema = load_graph_schema(schema_path)
             graph_schema = learn_from_discovery(graph_schema, all_nodes, all_edges)
@@ -152,6 +157,13 @@ class AWSProvider:
                 profile=self._profile,
                 region=self.region,
             )
+
+            # Learn relationship rules (property → edge promotion)
+            rules = load_relationship_rules()
+            rules = learn_relationships(rules, all_nodes)
+            learned_edges = apply_relationship_rules(rules, all_nodes)
+            all_edges.extend(learned_edges)
+            save_relationship_rules(rules)
 
         duration = int((time.time() - t0) * 1000)
 
