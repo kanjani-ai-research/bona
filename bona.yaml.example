@@ -27,3 +27,7 @@ output:
 
 schema_cache:
   # s3_uri: s3://my-bucket/schemas/  # auto-upload type schemas to S3
+
+graph_schema:
+  # s3_uri: s3://my-bucket/graph-schema.json  # upload learned schema to S3
+  # path: ./graph-schema.json                 # local path override (default: ~/.bona/graph-schema.json)

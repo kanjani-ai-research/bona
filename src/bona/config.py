@@ -121,6 +121,14 @@ class SchemaCacheConfig:
 
 
 @dataclass
+class GraphSchemaConfig:
+    """Controls graph schema (learn mode) storage."""
+
+    s3_uri: str = ""  # S3 URI for graph-schema.json upload
+    path: str = ""    # local path override (default: ~/.bona/graph-schema.json)
+
+
+@dataclass
 class BonaConfig:
     """Top-level configuration."""
 
@@ -128,6 +136,7 @@ class BonaConfig:
     output: OutputConfig = field(default_factory=OutputConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     schema_cache: SchemaCacheConfig = field(default_factory=SchemaCacheConfig)
+    graph_schema: GraphSchemaConfig = field(default_factory=GraphSchemaConfig)
 
     @classmethod
     def from_dict(cls, data: dict) -> "BonaConfig":
@@ -136,6 +145,7 @@ class BonaConfig:
         output_data = data.get("output", {})
         logging_data = data.get("logging", {})
         schema_cache_data = data.get("schema_cache", {})
+        graph_schema_data = data.get("graph_schema", {})
 
         enrichment = EnrichmentConfig(
             enabled=enrichment_data.get("enabled", False),
@@ -159,7 +169,12 @@ class BonaConfig:
             s3_uri=schema_cache_data.get("s3_uri", ""),
         )
 
-        return cls(enrichment=enrichment, output=output, logging=log_cfg, schema_cache=schema_cache)
+        graph_schema = GraphSchemaConfig(
+            s3_uri=graph_schema_data.get("s3_uri", ""),
+            path=graph_schema_data.get("path", ""),
+        )
+
+        return cls(enrichment=enrichment, output=output, logging=log_cfg, schema_cache=schema_cache, graph_schema=graph_schema)
 
     @classmethod
     def default(cls) -> "BonaConfig":

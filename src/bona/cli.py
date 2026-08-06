@@ -145,6 +145,9 @@ def _do_export(args):
 
         # Learn mode
         provider.learn_mode = args.learn
+        if args.learn:
+            provider._graph_schema_path = cfg.graph_schema.path or ""
+            provider._graph_schema_s3_uri = cfg.graph_schema.s3_uri or ""
 
         result = provider.discover()
         all_results.append(result)

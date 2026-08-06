@@ -252,16 +252,64 @@ def load_graph_schema(path: Optional[str] = None) -> GraphSchema:
         return GraphSchema.empty()
 
 
-def save_graph_schema(schema: GraphSchema, path: Optional[str] = None) -> Path:
-    """Save graph schema to file."""
+def save_graph_schema(schema: GraphSchema, path: Optional[str] = None, s3_uri: str = "", profile: str = "", region: str = "us-east-1") -> Path:
+    """Save graph schema to local file and optionally upload to S3.
+
+    Args:
+        schema: graph schema to save
+        path: local file path (default: ~/.bona/graph-schema.json)
+        s3_uri: S3 URI to upload (e.g. s3://bucket/schemas/graph-schema.json)
+        profile: AWS profile for S3 upload
+        region: AWS region for S3 upload
+    """
     schema_path = Path(path) if path else DEFAULT_SCHEMA_PATH
     schema_path.parent.mkdir(parents=True, exist_ok=True)
 
     schema.last_updated = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-    schema_path.write_text(json.dumps(schema.to_dict(), indent=2))
+    content = json.dumps(schema.to_dict(), indent=2)
+    schema_path.write_text(content)
     logger.info("Saved graph schema: %s (%s)", schema_path, schema.summary())
+
+    # Optional S3 upload
+    if s3_uri:
+        _upload_schema_to_s3(content, s3_uri, profile, region)
+
     return schema_path
+
+
+def _upload_schema_to_s3(content: str, s3_uri: str, profile: str = "", region: str = "us-east-1") -> None:
+    """Upload graph schema to S3."""
+    import boto3
+
+    if not s3_uri.startswith("s3://"):
+        logger.error("Invalid S3 URI for graph schema: %s", s3_uri)
+        return
+
+    parts = s3_uri[5:].split("/", 1)
+    bucket = parts[0]
+    key = parts[1] if len(parts) > 1 else "graph-schema.json"
+
+    # If URI ends with / it's a prefix, append filename
+    if key.endswith("/") or not key:
+        key = f"{key}graph-schema.json"
+
+    try:
+        session_kwargs = {"region_name": region}
+        if profile:
+            session_kwargs["profile_name"] = profile
+        session = boto3.Session(**session_kwargs)
+        s3 = session.client("s3")
+
+        s3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=content.encode("utf-8"),
+            ContentType="application/json",
+        )
+        logger.info("Graph schema uploaded to s3://%s/%s", bucket, key)
+    except Exception as e:
+        logger.warning("Failed to upload graph schema to S3: %s", e)
 
 
 # ==================================================================

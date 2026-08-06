@@ -79,6 +79,9 @@ class AWSProvider:
         self.validate_schemas = False
         self.enrichment_config = None  # Set from BonaConfig
         self.learn_mode = False  # Update graph schema from discoveries
+        self._graph_schema_path = ""  # Local path override
+        self._graph_schema_s3_uri = ""  # S3 URI for upload
+        self._profile = profile  # Store for S3 uploads
 
         session_kwargs = {"region_name": region}
         if profile:
@@ -139,9 +142,16 @@ class AWSProvider:
         # 6. Learn mode — update graph schema from discoveries
         if self.learn_mode:
             from bona.graph_schema import load_graph_schema, save_graph_schema, learn_from_discovery
-            graph_schema = load_graph_schema()
+            schema_path = self._graph_schema_path or None
+            graph_schema = load_graph_schema(schema_path)
             graph_schema = learn_from_discovery(graph_schema, all_nodes, all_edges)
-            save_graph_schema(graph_schema)
+            save_graph_schema(
+                graph_schema,
+                path=schema_path,
+                s3_uri=self._graph_schema_s3_uri,
+                profile=self._profile,
+                region=self.region,
+            )
 
         duration = int((time.time() - t0) * 1000)
 
