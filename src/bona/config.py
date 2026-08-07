@@ -156,6 +156,18 @@ class LLMTaskConfig:
 
 
 @dataclass
+class GCPConfig:
+    """GCP provider configuration."""
+
+    project_id: str = ""
+    organization_id: str = ""
+    folder_id: str = ""
+    credentials: str = ""  # path to service account key JSON (or use GOOGLE_APPLICATION_CREDENTIALS)
+    asset_types: list[str] = field(default_factory=list)  # filter, empty = all
+    content_type: str = "resource"  # resource | iam_policy | org_policy
+
+
+@dataclass
 class MCPServerEntry:
     """A single MCP server entry."""
 
@@ -216,6 +228,7 @@ class BonaConfig:
     learning: LearningConfig = field(default_factory=LearningConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     prompts: PromptsConfig = field(default_factory=PromptsConfig)
+    gcp: GCPConfig = field(default_factory=GCPConfig)
 
     @classmethod
     def from_dict(cls, data: dict) -> "BonaConfig":
@@ -309,7 +322,17 @@ class BonaConfig:
             system=prompts_data.get("system", _default_prompts.system),
         )
 
-        return cls(enrichment=enrichment, output=output, logging=log_cfg, schema_cache=schema_cache, graph_schema=graph_schema, llm=llm_cfg, learning=learning_cfg, mcp=mcp_cfg, prompts=prompts_cfg)
+        gcp_data = data.get("gcp", {})
+        gcp_cfg = GCPConfig(
+            project_id=gcp_data.get("project_id", ""),
+            organization_id=gcp_data.get("organization_id", ""),
+            folder_id=gcp_data.get("folder_id", ""),
+            credentials=gcp_data.get("credentials", ""),
+            asset_types=gcp_data.get("asset_types", []),
+            content_type=gcp_data.get("content_type", "resource"),
+        )
+
+        return cls(enrichment=enrichment, output=output, logging=log_cfg, schema_cache=schema_cache, graph_schema=graph_schema, llm=llm_cfg, learning=learning_cfg, mcp=mcp_cfg, prompts=prompts_cfg, gcp=gcp_cfg)
 
     @classmethod
     def default(cls) -> "BonaConfig":

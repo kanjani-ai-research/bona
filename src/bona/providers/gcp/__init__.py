@@ -97,13 +97,20 @@ class GCPProvider(AssetProvider):
 
     def __init__(self, project_id: str = "", organization_id: str = "",
                  folder_id: str = "", asset_types: Optional[list[str]] = None,
-                 content_type: str = "resource", **kwargs):
+                 content_type: str = "resource", credentials: str = "", **kwargs):
         super().__init__(region="global", account_id=project_id, **kwargs)
         self.project_id = project_id
         self.organization_id = organization_id
         self.folder_id = folder_id
         self.asset_types = asset_types or []
         self.content_type = content_type
+        self.credentials = credentials  # path to service account key JSON
+
+        # Set credentials env var if provided
+        if self.credentials:
+            import os
+            expanded = os.path.expanduser(self.credentials)
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = expanded
 
     @property
     def _scope(self) -> str:
