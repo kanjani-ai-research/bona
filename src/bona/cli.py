@@ -95,6 +95,16 @@ def main():
     slice_parser.add_argument("--direction", choices=["upstream", "downstream"], default="downstream", help="Impact direction (default: downstream)")
     slice_parser.add_argument("--output-dir", default="./bona-slice", help="Output directory for slice")
 
+    # query command (interactive APGQL traversal)
+    query_parser = subparsers.add_parser("query", help="Run APGQL traversals against the graph")
+    query_parser.add_argument("--profile", default="", help="AWS profile name")
+    query_parser.add_argument("--region", default="us-east-1", help="AWS region")
+    query_parser.add_argument("--types", default="", help="Resource type filter")
+    query_parser.add_argument("--max-resources", type=int, default=10000, help="Safety cap")
+    query_parser.add_argument("--enrich", nargs="?", const="soft", choices=["soft", "hard"], default=None, help="Enable enrichment")
+    query_parser.add_argument("--expr", default="", help="APGQL expression to evaluate (e.g. 'apg.nodes(\"AWS::EC2::*\").count')")
+    query_parser.add_argument("--repl", action="store_true", help="Start interactive REPL")
+
     args = parser.parse_args()
 
     # Load config and configure logging
@@ -122,9 +132,80 @@ def main():
         _do_scan(args)
     elif args.command == "slice":
         _do_slice(args)
+    elif args.command == "query":
+        _do_query(args)
 
     # Flush logs to S3 if configured
     flush_to_s3()
+
+
+def _do_query(args):
+    """Run APGQL queries against the graph."""
+    import json as json_mod
+    from .providers.aws.aws_provider import AWSProvider
+    from .config import load_config, EnrichmentConfig
+    from .query import APG
+
+    logger = logging.getLogger(__name__)
+    cfg = load_config(args.config if hasattr(args, 'config') else None)
+    type_filter = [t.strip() for t in args.types.split(",") if t.strip()] or None
+
+    # Discover
+    provider = AWSProvider(
+        profile=args.profile,
+        region=args.region,
+        max_resources=args.max_resources,
+        resource_types=type_filter,
+    )
+    if args.enrich:
+        provider.validate_schemas = True
+        provider.enrichment_config = EnrichmentConfig(enabled=True, mode=args.enrich)
+
+    result = provider.discover()
+    apg = APG(result.resources, result.relationships)
+    logger.info("Graph loaded: %s", apg.summary)
+
+    if args.expr:
+        # Evaluate expression
+        try:
+            output = eval(args.expr, {"apg": apg, "APG": APG})
+            if isinstance(output, (list, dict)):
+                print(json_mod.dumps(output, indent=2, default=str))
+            else:
+                print(output)
+        except Exception as e:
+            print(f"Error: {e}")
+    elif args.repl:
+        # Interactive REPL
+        print(f"\n  Bona APGQL REPL")
+        print(f"  {apg.summary}")
+        print(f"  Type traversals using 'apg' as root. Ctrl+D to exit.\n")
+        print(f"  Examples:")
+        print(f"    apg.nodes('AWS::EC2::*').count")
+        print(f"    apg.nodes('AWS::Bedrock::Agent').out('USES_MODEL').name.l")
+        print(f"    apg.node('vpc-abc').out().name.l")
+        print()
+        while True:
+            try:
+                expr = input("apgql> ")
+                if not expr.strip():
+                    continue
+                output = eval(expr, {"apg": apg, "APG": APG})
+                if isinstance(output, (list, dict)):
+                    print(json_mod.dumps(output, indent=2, default=str))
+                else:
+                    print(output)
+            except EOFError:
+                print("\nBye.")
+                break
+            except KeyboardInterrupt:
+                print()
+                continue
+            except Exception as e:
+                print(f"Error: {e}")
+    else:
+        print(f"  {apg.summary}")
+        print(f"  Use --expr 'apg.nodes(...)...' or --repl for interactive mode")
 
 
 def _do_slice(args):
