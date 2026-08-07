@@ -19,11 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Graph schema with learn mode (`--learn`) — auto-maintains node/edge type registry at `~/.bona/graph-schema.json`
 - Semver versioning on graph schema (MINOR for new types/pairs, PATCH for observation updates)
 - Config backfill — automatically uses `batch_get_resource_config` when SQL query returns empty configurations
+- Relationship learner — auto-discovers edge inference rules from property values (`~/.bona/relationship-rules.json`)
+- LLM enrichment via Bedrock (`--llm-enrich`) — classifies properties, validates rules, generates descriptions
+- Configurable LLM settings in `bona.yaml` — per-task model selection, budget control, temperature, system prompt
+- Bedrock reference providers — full model graph decomposition (119 models → Provider, Modality, Family nodes + edges)
+- Bedrock Agents + Prompts discovery with USES_MODEL and HAS_KB edges
+- Bedrock Platform resources (Guardrails, Prompt Routers, Batch Jobs, Automated Reasoning)
+- Bedrock AgentCore discovery (Runtimes, Gateways, Registries, Memories, Workload Identities)
+- Bedrock Mantle availability detection on ON_DEMAND models with multi-region support
 
 ### Changed
 
 - Unified enrichment pipeline replaces per-service enrichment files
 - Logging uses structured module (`bona.logging`) instead of print statements
+- Relationship learning now has two layers: pattern matching + LLM classification
+- Reference providers are a new category separate from supplemental providers
 
 ## [0.1.0] — 2026-08-05
 

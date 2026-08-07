@@ -94,6 +94,27 @@ Enrichment adds **TypeDefinition reference nodes** and **INSTANCE_OF edges** to 
 
 One TypeDefinition node per resource type carries the full schema contract (properties, required fields, read-only, identifiers).
 
+### Bedrock Discovery
+
+Bona discovers your **Amazon Bedrock** environment — foundation models, agents, knowledge bases, prompts, guardrails, and AgentCore components:
+
+```bash
+bona export --profile myprofile --region us-east-1 --types "AWS::Bedrock::*"
+```
+
+**What it discovers:** 119+ foundation models, providers (Anthropic, Meta, Amazon, etc.), modalities (TEXT, IMAGE, EMBEDDING), model families, Bedrock Agents, Prompt Flows, and AgentCore resources.
+
+**Graph structure** — model decomposition:
+
+```
+[Model "claude-3-sonnet"] ──PROVIDED_BY──▶ [Provider "Anthropic"]
+[Model "claude-3-sonnet"] ──HAS_MODALITY──▶ [Modality "TEXT"]
+[Agent "support-bot"] ──USES_MODEL──▶ [Model "claude-3-sonnet"]
+[Agent "support-bot"] ──HAS_KB──▶ [KnowledgeBase "product-docs"]
+```
+
+See [docs/bedrock-discovery.md](docs/bedrock-discovery.md) for full details.
+
 ### Configuration File
 
 Control enrichment, output, and logging via `bona.yaml`:
@@ -167,6 +188,46 @@ The schema lives at **`~/.bona/graph-schema.json`** (configurable via `schema.pa
 
 See [docs/graph-schema.md](docs/graph-schema.md) for full details.
 
+### LLM Enrichment
+
+LLM enrichment uses **Amazon Bedrock** to analyze resource properties and improve graph quality:
+
+- **Relationship classification** — identifies properties that reference other resources and converts them into typed edges
+- **Description generation** — produces human-readable summaries of resources for graph exploration and RAG
+
+```bash
+# Export with LLM enrichment
+bona export --profile myprofile --region us-east-1 --llm-enrich
+
+# Combine with schema enrichment and learn mode
+bona export --profile myprofile --region us-east-1 --enrich --llm-enrich --learn
+```
+
+**Configuration** in `bona.yaml`:
+
+```yaml
+llm_enrichment:
+  model_id: anthropic.claude-3-haiku-20240307-v1:0
+  tasks:
+    - classify_relationships
+    - generate_descriptions
+  budget:
+    max_invocations: 500        # cap per export run
+    max_input_tokens: 100000    # total input token budget
+```
+
+**Example** — what LLM enrichment discovers:
+
+```
+# A securityGroupIds property gets classified as a relationship:
+[Lambda "api-handler"] ──IS_ASSOCIATED_WITH──▶ [SG "sg-abc123"]
+
+# A resource gets a generated description:
+{ "description": "Production API handler Lambda in VPC, triggered by API Gateway, with DynamoDB access" }
+```
+
+See [docs/llm-enrichment.md](docs/llm-enrichment.md) for full details.
+
 ## CLI Reference
 
 ```
@@ -198,6 +259,7 @@ Commands:
 | `--aggregator` | | Config aggregator name for multi-account queries |
 | `--enrich` | disabled | Enable type schema enrichment (`soft` or `hard`). If flag given without value: `soft` |
 | `--learn` | false | Update graph schema with discovered node/edge types (writes `~/.bona/graph-schema.json`) |
+| `--llm-enrich` | false | Enable LLM enrichment via Bedrock (classify relationships, generate descriptions) |
 | `--refresh-cache` | false | Force refresh of all cached data from AWS |
 
 ### `bona schema`
@@ -394,6 +456,7 @@ See [docs/multi-account.md](docs/multi-account.md) for aggregator setup instruct
   - `config:DescribeConfigRules` (if using `--include-compliance`)
   - `cloudformation:DescribeType` (if using `--enrich` or `bona schema`)
   - `ec2:DescribeInstanceTypes` (if using EC2 supplemental enrichment)
+  - `bedrock-runtime:Converse` (if using `--llm-enrich`)
   - `sts:GetCallerIdentity`
   - `s3:PutObject` (if using `--s3-uri`)
 - AWS Config recorder must be enabled in target region(s)

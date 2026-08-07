@@ -31,3 +31,17 @@ schema_cache:
 graph_schema:
   # s3_uri: s3://my-bucket/graph-schema.json  # upload learned schema to S3
   # path: ./graph-schema.json                 # local path override (default: ~/.bona/graph-schema.json)
+
+# ─── LLM Configuration ───────────────────────────────────────────────────────
+# Controls AI-powered analysis of infrastructure resources.
+llm:
+  # enabled: true                                        # Toggle LLM features on/off (default: true)
+  # model_id: us.anthropic.claude-sonnet-4-5-20250929-v1:0  # Default Bedrock model for all LLM tasks
+  # region: us-east-1                                    # AWS region for Bedrock API calls
+  # temperature: 0.0                                     # Sampling temperature (0.0 = deterministic)
+  # budget_max_calls: 10                                 # Max LLM invocations per run (cost guardrail)
+  # system_prompt: "You are an AWS infrastructure analyst."  # Base system prompt for all tasks
+  # tasks:                                               # Per-task model overrides (optional)
+  #   classify: us.anthropic.claude-sonnet-4-5-20250929-v1:0   # Model for resource classification
+  #   validate: us.anthropic.claude-sonnet-4-5-20250929-v1:0   # Model for validation checks
+  #   describe: us.amazon.nova-lite-v1:0                       # Model for generating descriptions (cheaper/faster)
