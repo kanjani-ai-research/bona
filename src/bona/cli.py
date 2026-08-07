@@ -51,6 +51,13 @@ def main():
     fw_parser.add_argument("--region", default="us-east-1", help="AWS region")
     fw_parser.add_argument("--all", action="store_true", help="Apply to all frameworks")
 
+    # prompts command (manage + sync prompt templates)
+    prompts_parser = subparsers.add_parser("prompts", help="Manage prompt templates (list, sync to Bedrock)")
+    prompts_parser.add_argument("action", choices=["list", "sync", "render"], help="Action")
+    prompts_parser.add_argument("--name", default="", help="Prompt name (for render)")
+    prompts_parser.add_argument("--profile", default="", help="AWS profile name")
+    prompts_parser.add_argument("--region", default="us-east-1", help="AWS region")
+
     # export command
     export_parser = subparsers.add_parser("export", help="Export Asset Property Graph (nodes.json + edges.json)")
     export_parser.add_argument("--profile", default="", help="AWS profile name (from ~/.aws/credentials)")
@@ -152,6 +159,8 @@ def main():
         _do_completion(args)
     elif args.command == "framework":
         _do_framework(args)
+    elif args.command == "prompts":
+        _do_prompts(args)
     elif args.command == "export":
         _do_export(args)
     elif args.command == "types":
@@ -270,6 +279,47 @@ def _do_framework(args):
             print(f"\n  Deployed Conformance Packs:\n")
             for p in packs:
                 print(f"  {p['name']}: score={p['score']}% ({p['status']})")
+
+
+def _do_prompts(args):
+    """Manage prompt templates."""
+    from .prompts import list_prompts, load_prompt, render_prompt, sync_to_bedrock
+
+    logger = logging.getLogger(__name__)
+
+    if args.action == "list":
+        prompts = list_prompts()
+        print(f"\n  Prompt Templates ({len(prompts)}):\n")
+        print(f"  {'Name':<25} {'Version':<8} {'Synced':<8} Description")
+        print(f"  {'-'*25} {'-'*8} {'-'*8} {'-'*45}")
+        for p in prompts:
+            synced = "✅" if p["bedrock_prompt_id"] else "—"
+            print(f"  {p['name']:<25} {p['version']:<8} {synced:<8} {p['description'][:45]}")
+
+    elif args.action == "sync":
+        import boto3
+        session_kwargs = {"region_name": args.region}
+        if args.profile:
+            session_kwargs["profile_name"] = args.profile
+        session = boto3.Session(**session_kwargs)
+
+        results = sync_to_bedrock(session, args.region)
+        print(f"\n  Synced to Bedrock Prompt Management:\n")
+        for r in results:
+            status = "✅" if r["status"] in ("created", "updated") else "❌"
+            print(f"  {status} {r['name']}: {r['status']} (id={r.get('id', r.get('error', '')[:30])})")
+
+    elif args.action == "render":
+        if not args.name:
+            print("  Specify --name <prompt-name>")
+            return
+        prompt = load_prompt(args.name)
+        if not prompt:
+            print(f"  Prompt not found: {args.name}")
+            return
+        print(f"\n  System:\n{prompt.get('system', '')}")
+        print(f"\n  User Template:\n{prompt.get('user_template', '')}")
+        print(f"\n  Variables: {prompt.get('input_variables', [])}")
 
 
 def _do_doctor(args):

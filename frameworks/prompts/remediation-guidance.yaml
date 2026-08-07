@@ -1,0 +1,57 @@
+name: remediation-guidance
+version: "1.0"
+description: Generate actionable remediation for compliance findings with KB context
+bedrock_prompt_id: "5FWA9YAF2D"
+
+system: |
+  You are a cloud security remediation specialist. Generate specific, actionable remediation
+  steps for AWS compliance findings. Include CLI commands, IaC snippets, and explain the
+  security impact of the finding.
+
+user_template: |
+  Finding:
+    Resource: {{resource_id}} ({{resource_type}})
+    Rule Failed: {{rule_name}}
+    Rule Description: {{rule_description}}
+    NIST Control: {{nist_control_id}} — {{nist_control_title}}
+    Annotation: {{annotation}}
+  
+  {{#if kb_context}}
+  Framework Guidance (from Knowledge Base):
+  {{kb_context}}
+  {{/if}}
+  
+  {{#if resource_properties}}
+  Current Resource Configuration:
+  {{resource_properties}}
+  {{/if}}
+  
+  Provide remediation:
+  
+  ```json
+  {
+    "severity": "Critical|High|Medium|Low",
+    "impact": "what happens if not fixed",
+    "remediation_steps": [
+      "step 1...",
+      "step 2..."
+    ],
+    "cli_command": "aws ... (if applicable)",
+    "iac_snippet": "terraform/cloudformation snippet (if applicable)",
+    "verification": "how to verify the fix worked",
+    "references": ["url1", "url2"]
+  }
+  ```
+
+input_variables:
+  - resource_id
+  - resource_type
+  - rule_name
+  - rule_description
+  - nist_control_id
+  - nist_control_title
+  - annotation
+  - kb_context
+  - resource_properties
+
+tags: [compliance, remediation, actionable]
