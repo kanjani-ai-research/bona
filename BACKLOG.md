@@ -8,7 +8,7 @@
 - [x] ~~Enable + test Audit Manager in lab account~~ (deprecated by AWS, April 2026)
 - [x] Parallel provider execution using workers.py ThreadPoolExecutor
 - [x] MCP-powered generic discovery provider (any AWS service, zero-code)
-- [ ] `bona export --format neo4jcsv` tested with actual Neptune import
+- [x] `bona export --format neptunecsv` — Neptune bulk loader compatible (validated + S3 staged)
 
 ## Future Plugins
 

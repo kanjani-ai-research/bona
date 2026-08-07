@@ -69,6 +69,80 @@ def export_neo4jcsv(nodes: list[AssetNode], edges: list[AssetEdge], output_dir: 
 
 
 # ==================================================================
+# Neptune CSV (Gremlin bulk loader format)
+# ==================================================================
+
+
+def export_neptunecsv(nodes: list[AssetNode], edges: list[AssetEdge], output_dir: str) -> dict:
+    """Export as Amazon Neptune bulk loader CSV (Gremlin format).
+
+    Produces:
+      - vertices.csv (~id, ~label, property:type columns)
+      - edges.csv (~id, ~from, ~to, ~label, property:type columns)
+
+    Follows: https://docs.aws.amazon.com/neptune/latest/userguide/bulk-load-tutorial-format-gremlin.html
+    """
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    # Collect property keys and infer types
+    all_props: dict[str, str] = {}  # prop_name -> Neptune type
+    for n in nodes:
+        d = n.to_dict()
+        for k, v in d.items():
+            if k in ("id", "node_type") or k.startswith("_"):
+                continue
+            if k not in all_props:
+                all_props[k] = _neptune_type(v)
+
+    prop_cols = sorted(all_props.keys())
+
+    # Write vertices.csv
+    header = ["~id", "~label"] + [f"{col}:{all_props[col]}" for col in prop_cols]
+    with open(out / "vertices.csv", "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        for n in nodes:
+            d = n.to_dict()
+            row = [d.get("id", ""), d.get("node_type", "").replace("::", "_")]
+            for col in prop_cols:
+                val = d.get(col, "")
+                if isinstance(val, (list, dict)):
+                    val = json.dumps(val, default=str)
+                elif isinstance(val, bool):
+                    val = str(val).lower()
+                row.append(str(val) if val is not None and val != "" else "")
+            writer.writerow(row)
+
+    # Write edges.csv
+    with open(out / "edges.csv", "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["~id", "~from", "~to", "~label"])
+        for i, e in enumerate(edges):
+            edge_id = f"{e.source_id}_{e.edge_type}_{e.target_id}"[:200]
+            writer.writerow([edge_id, e.source_id, e.target_id, e.edge_type])
+
+    logger.info("Exported neptunecsv: %d vertices, %d edges → %s", len(nodes), len(edges), out)
+    return {
+        "format": "neptunecsv",
+        "vertices_file": str(out / "vertices.csv"),
+        "edges_file": str(out / "edges.csv"),
+    }
+
+
+def _neptune_type(value: Any) -> str:
+    """Infer Neptune property type from a Python value."""
+    if isinstance(value, bool):
+        return "Bool"
+    elif isinstance(value, int):
+        return "Int"
+    elif isinstance(value, float):
+        return "Double"
+    else:
+        return "String"
+
+
+# ==================================================================
 # GraphML
 # ==================================================================
 
