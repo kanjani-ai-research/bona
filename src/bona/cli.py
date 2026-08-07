@@ -13,15 +13,35 @@ import logging
 import sys
 
 
+def _get_version() -> str:
+    """Get bona version from package metadata or __init__."""
+    try:
+        from importlib.metadata import version
+        return version("bona")
+    except Exception:
+        from . import __version__
+        return __version__
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="bona",
         description="Asset Property Graph — the Joern for cloud infrastructure",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
+    parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {_get_version()}")
     parser.add_argument("--config", default="", help="Path to bona config file (JSON or YAML). Searches ./bona.yaml, ~/.bona/config.yaml if not set")
 
     subparsers = parser.add_subparsers(dest="command")
+
+    # doctor command (validate environment)
+    doctor_parser = subparsers.add_parser("doctor", help="Validate environment: credentials, permissions, Config recorder")
+    doctor_parser.add_argument("--profile", default="", help="AWS profile name")
+    doctor_parser.add_argument("--region", default="us-east-1", help="AWS region")
+
+    # completion command (shell completion)
+    completion_parser = subparsers.add_parser("completion", help="Generate shell completion script")
+    completion_parser.add_argument("shell", choices=["bash", "zsh", "fish"], help="Shell type")
 
     # export command
     export_parser = subparsers.add_parser("export", help="Export Asset Property Graph (nodes.json + edges.json)")
@@ -118,7 +138,11 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    if args.command == "export":
+    if args.command == "doctor":
+        _do_doctor(args)
+    elif args.command == "completion":
+        _do_completion(args)
+    elif args.command == "export":
         _do_export(args)
     elif args.command == "types":
         _do_types(args)
@@ -137,6 +161,171 @@ def main():
 
     # Flush logs to S3 if configured
     flush_to_s3()
+
+
+def _do_completion(args):
+    """Generate shell completion script."""
+    COMMANDS = "export scan slice query schema types history cache doctor completion"
+    if args.shell == "bash":
+        print(f"""# bona bash completion — add to ~/.bashrc:
+#   eval "$(bona completion bash)"
+_bona_complete() {{
+    local cur="${{COMP_WORDS[COMP_CWORD]}}"
+    local commands="{COMMANDS}"
+    if [ $COMP_CWORD -eq 1 ]; then
+        COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+    fi
+}}
+complete -F _bona_complete bona""")
+    elif args.shell == "zsh":
+        print(f"""# bona zsh completion — add to ~/.zshrc:
+#   eval "$(bona completion zsh)"
+_bona() {{
+    local commands=({COMMANDS})
+    _arguments '1:command:($commands)' '*::arg:->args'
+}}
+compdef _bona bona""")
+    elif args.shell == "fish":
+        cmds = COMMANDS.split()
+        print("# bona fish completion — add to ~/.config/fish/completions/bona.fish")
+        for cmd in cmds:
+            print(f"complete -c bona -n '__fish_use_subcommand' -a '{cmd}'")
+
+
+def _do_doctor(args):
+    """Validate environment: credentials, permissions, Config recorder."""
+    import boto3
+    from botocore.exceptions import ClientError, NoCredentialsError
+
+    print(f"\n  Bona Doctor — Environment Validation")
+    print(f"  Profile: {args.profile or '(default)'}")
+    print(f"  Region:  {args.region}")
+    print(f"  Version: {_get_version()}")
+    print()
+
+    session_kwargs = {"region_name": args.region}
+    if args.profile:
+        session_kwargs["profile_name"] = args.profile
+
+    checks_passed = 0
+    checks_failed = 0
+
+    # 1. AWS Credentials
+    try:
+        session = boto3.Session(**session_kwargs)
+        sts = session.client("sts", region_name=args.region)
+        identity = sts.get_caller_identity()
+        print(f"  ✅ AWS Credentials")
+        print(f"     Account: {identity['Account']}")
+        print(f"     ARN: {identity['Arn']}")
+        checks_passed += 1
+    except NoCredentialsError:
+        print(f"  ❌ AWS Credentials — not configured")
+        print(f"     Run: aws configure --profile {args.profile or 'default'}")
+        checks_failed += 1
+        print(f"\n  Result: {checks_passed} passed, {checks_failed} failed")
+        return
+    except ClientError as e:
+        print(f"  ❌ AWS Credentials — {e}")
+        checks_failed += 1
+        print(f"\n  Result: {checks_passed} passed, {checks_failed} failed")
+        return
+
+    # 2. Config Service Access
+    try:
+        config_client = session.client("config", region_name=args.region)
+        config_client.describe_configuration_recorder_status()
+        print(f"  ✅ AWS Config access")
+        checks_passed += 1
+    except ClientError as e:
+        print(f"  ❌ AWS Config access — {e.response['Error']['Code']}")
+        print(f"     Need: config:DescribeConfigurationRecorderStatus")
+        checks_failed += 1
+
+    # 3. Config Recorder
+    try:
+        resp = config_client.describe_configuration_recorders()
+        recorders = resp.get("ConfigurationRecorders", [])
+        if recorders:
+            group = recorders[0].get("recordingGroup", {})
+            all_supported = group.get("allSupported", False)
+            status_resp = config_client.describe_configuration_recorder_status()
+            recording = status_resp["ConfigurationRecordersStatus"][0].get("recording", False)
+            if recording:
+                scope = "all types" if all_supported else f"{len(group.get('resourceTypes', []))} types"
+                print(f"  ✅ Config Recorder — active ({scope})")
+                checks_passed += 1
+            else:
+                print(f"  ⚠️  Config Recorder — exists but NOT recording")
+                checks_failed += 1
+        else:
+            print(f"  ❌ Config Recorder — not configured")
+            print(f"     Run: bona needs AWS Config recorder enabled")
+            checks_failed += 1
+    except ClientError:
+        print(f"  ⚠️  Config Recorder — could not check")
+
+    # 4. SelectResourceConfig permission
+    try:
+        config_client.select_resource_config(Expression="SELECT resourceType LIMIT 1", Limit=1)
+        print(f"  ✅ Config Advanced Query (SelectResourceConfig)")
+        checks_passed += 1
+    except ClientError as e:
+        code = e.response["Error"]["Code"]
+        if "AccessDenied" in code:
+            print(f"  ❌ Config Advanced Query — AccessDenied")
+            print(f"     Need: config:SelectResourceConfig")
+            checks_failed += 1
+        else:
+            print(f"  ✅ Config Advanced Query (available, will use fallback)")
+            checks_passed += 1
+
+    # 5. CloudFormation DescribeType (for enrichment)
+    try:
+        cfn = session.client("cloudformation", region_name=args.region)
+        cfn.describe_type(Type="RESOURCE", TypeName="AWS::S3::Bucket")
+        print(f"  ✅ CloudFormation DescribeType (for --enrich)")
+        checks_passed += 1
+    except ClientError as e:
+        code = e.response["Error"]["Code"]
+        if "AccessDenied" in code or "InvalidClientTokenId" in code:
+            print(f"  ⚠️  CloudFormation DescribeType — no access (--enrich won't work)")
+            print(f"     Need: cloudformation:DescribeType")
+        else:
+            print(f"  ✅ CloudFormation DescribeType (available)")
+            checks_passed += 1
+
+    # 6. Bedrock access (for reference providers)
+    try:
+        bedrock = session.client("bedrock", region_name=args.region)
+        bedrock.list_foundation_models()
+        print(f"  ✅ Bedrock ListFoundationModels (for reference providers)")
+        checks_passed += 1
+    except ClientError:
+        print(f"  ⚠️  Bedrock — no access (reference providers won't discover models)")
+
+    # 7. Python version
+    import platform
+    py_version = platform.python_version()
+    if tuple(int(x) for x in py_version.split(".")[:2]) >= (3, 11):
+        print(f"  ✅ Python {py_version}")
+        checks_passed += 1
+    else:
+        print(f"  ❌ Python {py_version} — need 3.11+")
+        checks_failed += 1
+
+    # 8. Cache directory
+    from pathlib import Path
+    cache_dir = Path.home() / ".bona" / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    print(f"  ✅ Cache directory: {cache_dir}")
+    checks_passed += 1
+
+    print(f"\n  Result: {checks_passed} passed, {checks_failed} failed")
+    if checks_failed == 0:
+        print(f"  🎉 All checks passed — bona is ready to use!")
+    else:
+        print(f"  ⚠️  Some checks failed — bona may have limited functionality")
 
 
 def _do_query(args):

@@ -1,6 +1,6 @@
 """Bona — Infrastructure Asset Property Graph. The Joern for cloud."""
 
-__version__ = "0.1.0"
+__version__ = "0.4.0"
 
 from .schema.model import AssetNode, AssetEdge, DiscoveryResult
 from .providers.aws.aws_provider import AWSProvider
