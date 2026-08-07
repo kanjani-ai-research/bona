@@ -226,3 +226,96 @@ This creates a promoted rule (`confidence ≥ 0.9`), which immediately produces 
 │   in us-east-1a..." │                     └─────────────────────┘
 └─────────────────────┘
 ```
+
+## MCP Integration (Tool Use)
+
+When MCP is enabled, the LLM can call external tools during classification reasoning. This gives Claude access to live AWS APIs, internal CMDBs, or custom services to make better decisions.
+
+### How It Works
+
+1. Bona builds an `MCPPool` from all configured servers
+2. Tools from all servers are aggregated and passed to the Bedrock Converse API as `toolConfig`
+3. During classification, Claude can invoke tools (e.g., describe a VPC, look up an IAM role) to verify relationships
+4. The agentic loop continues until Claude returns a final text response (max 5 iterations)
+
+### Configuration
+
+```yaml
+mcp:
+  enabled: true
+  servers:
+    - name: aws
+      server_url: "http://localhost:3000"    # AWS MCP Server
+    - name: cmdb
+      command: "npx @company/cmdb-mcp"       # Internal CMDB
+      tool_filter:                           # Only expose specific tools
+        - lookup_asset
+        - get_owner
+```
+
+### Multi-Server Support
+
+Each server entry supports:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Identifier for the server |
+| `server_url` | string | HTTP transport URL |
+| `command` | string | Stdio transport command |
+| `enabled` | bool | Toggle without removing (default: true) |
+| `tool_filter` | list | Only expose these tools to the LLM (empty = all) |
+
+Tool calls are automatically routed to the correct server based on tool name.
+
+## Managed Prompts
+
+Instead of hardcoded inline prompts, bona can load prompts from YAML templates (with optional Bedrock Prompt Management integration).
+
+### Configuration
+
+```yaml
+prompts:
+  classify:
+    source: local
+    local_name: classify-relationships    # frameworks/prompts/classify-relationships.yaml
+  system:
+    source: local
+    local_name: bona-system
+```
+
+### Resolution Order
+
+1. If `prompts_config` is provided and the prompt YAML exists → load template + system prompt from YAML
+2. If the YAML has a `bedrock_prompt_id` → that ID is available for Bedrock managed prompt invocation
+3. If no YAML is found → fall back to the inline prompt (backward compatible)
+
+### Prompt YAML Format
+
+```yaml
+name: classify-relationships
+version: "1.0"
+description: Classify AWS resource properties as relationships or attributes
+bedrock_prompt_id: "5IC5F9M285"    # Set after `bona prompts sync`
+
+system: |
+  You are an AWS infrastructure graph analyst...
+
+user_template: |
+  Analyze these nodes: {{nodes_json}}
+  Return JSON array...
+
+input_variables:
+  - nodes_json
+```
+
+## Parallel Provider Execution
+
+When multiple providers are configured, bona can run them in parallel using a ThreadPoolExecutor:
+
+```python
+from bona.workers import run_providers_parallel
+
+result = run_providers_parallel([aws_provider, gcp_provider], max_workers=4)
+```
+
+Results are merged into a single `DiscoveryResult`. Failed providers are logged and skipped gracefully.

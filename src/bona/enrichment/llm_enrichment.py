@@ -26,12 +26,15 @@ from botocore.exceptions import ClientError
 
 from ..schema.model import AssetNode, AssetEdge
 from ..relationship_learner import RelationshipCandidate, RelationshipRules
+from ..prompts import load_prompt, render_prompt
+from ..mcp_client import MCPClient, MCPPool
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_ID = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 MAX_NODES_PER_BATCH = 20
 MAX_CANDIDATES_PER_CALL = 10
+MAX_TOOL_LOOPS = 5
 
 
 # ==================================================================
@@ -79,6 +82,71 @@ def _parse_json_response(text: str) -> Optional[dict]:
         return None
 
 
+def _resolve_prompt(prompt_name: str, variables: dict, fallback_prompt: str,
+                    fallback_system: str = "") -> tuple[str, str, str]:
+    """Load prompt from YAML or fall back to inline. Returns (user_prompt, system_prompt, prompt_arn)."""
+    data = load_prompt(prompt_name)
+    if data:
+        template = data.get("user_template", "")
+        system = data.get("system", fallback_system)
+        prompt_arn = data.get("bedrock_prompt_id", "")
+        rendered = render_prompt(template, variables) if template else fallback_prompt
+        return rendered, system, prompt_arn
+    return fallback_prompt, fallback_system, ""
+
+
+def _call_bedrock_with_tools(session: boto3.Session, region: str, model_id: str,
+                             prompt: str, tools: list[dict], mcp_client,
+                             temperature: float = 0.0, system_prompt: str = "") -> Optional[str]:
+    """Call Bedrock converse with tool use, running an agentic loop."""
+    try:
+        client = session.client("bedrock-runtime", region_name=region)
+        messages = [{"role": "user", "content": [{"text": prompt}]}]
+        kwargs = {
+            "modelId": model_id,
+            "messages": messages,
+            "inferenceConfig": {"maxTokens": 4096, "temperature": temperature},
+            "toolConfig": {"tools": tools},
+        }
+        if system_prompt:
+            kwargs["system"] = [{"text": system_prompt}]
+
+        for _ in range(MAX_TOOL_LOOPS):
+            resp = client.converse(**kwargs)
+            stop = resp.get("stopReason", "")
+            output_msg = resp.get("output", {}).get("message", {})
+            messages.append(output_msg)
+
+            if stop != "tool_use":
+                # Final text response
+                for block in output_msg.get("content", []):
+                    if "text" in block:
+                        return block["text"]
+                return None
+
+            # Process tool calls
+            tool_results = []
+            for block in output_msg.get("content", []):
+                if "toolUse" in block:
+                    tu = block["toolUse"]
+                    result = mcp_client.call_tool(tu["name"], tu.get("input", {}))
+                    tool_results.append({
+                        "toolResult": {
+                            "toolUseId": tu["toolUseId"],
+                            "content": [{"text": json.dumps(result, default=str)}],
+                        }
+                    })
+
+            messages.append({"role": "user", "content": tool_results})
+            kwargs["messages"] = messages
+
+    except ClientError as e:
+        logger.warning("Bedrock tool-use call failed: %s", e)
+    except Exception as e:
+        logger.warning("LLM tool-use error: %s", e)
+    return None
+
+
 # ==================================================================
 # 1. Classify properties as relationships vs attributes
 # ==================================================================
@@ -92,6 +160,9 @@ def classify_properties(
     max_batch: int = MAX_NODES_PER_BATCH,
     temperature: float = 0.0,
     system_prompt: str = "",
+    prompts_config=None,
+    mcp_client: Optional[MCPClient] = None,
+    mcp_tools: Optional[list[dict]] = None,
 ) -> list[dict]:
     """Ask LLM to classify node properties as relationships or attributes."""
     # Sample diverse nodes (one per type, up to batch limit)
@@ -113,7 +184,8 @@ def classify_properties(
         if props:
             node_samples.append({"node_type": node_type, "properties": dict(list(props.items())[:10])})
 
-    prompt = f"""Analyze these AWS resource node properties and classify each property as either a RELATIONSHIP (references another resource) or ATTRIBUTE (describes this resource).
+    # Resolve prompt (managed or inline fallback)
+    fallback_prompt = f"""Analyze these AWS resource node properties and classify each property as either a RELATIONSHIP (references another resource) or ATTRIBUTE (describes this resource).
 
 For relationships, suggest:
 - target_type: the AWS resource type being referenced (e.g. "AWS::IAM::Role")
@@ -133,7 +205,21 @@ Return JSON array:
 
 Only include properties that ARE relationships. Skip obvious attributes (names, descriptions, counts, timestamps)."""
 
-    text = _call_bedrock(session, region, model_id, prompt)
+    prompt_name = prompts_config.classify.get("local_name", "") if prompts_config else ""
+    if prompt_name:
+        prompt, sys_prompt, _ = _resolve_prompt(
+            prompt_name, {"nodes_json": json.dumps(node_samples, indent=2)},
+            fallback_prompt, system_prompt)
+        system_prompt = sys_prompt or system_prompt
+    else:
+        prompt = fallback_prompt
+
+    # Use MCP tool-use loop if available
+    if mcp_client and mcp_tools:
+        text = _call_bedrock_with_tools(session, region, model_id, prompt, mcp_tools,
+                                        mcp_client, temperature, system_prompt)
+    else:
+        text = _call_bedrock(session, region, model_id, prompt)
     result = _parse_json_response(text)
     if isinstance(result, list):
         logger.info("LLM classified %d property-relationship candidates", len(result))
@@ -246,6 +332,7 @@ def generate_descriptions(
     max_batch: int = MAX_NODES_PER_BATCH,
     temperature: float = 0.0,
     system_prompt: str = "",
+    prompts_config=None,
 ) -> dict[str, str]:
     """Generate short descriptions for nodes that don't have one."""
     needs_description = [
@@ -300,13 +387,15 @@ def llm_enrich(
     rules: RelationshipRules,
     model_id: str = DEFAULT_MODEL_ID,
     config: Optional["LLMConfig"] = None,
+    prompts_config=None,
+    mcp_config=None,
 ) -> tuple[RelationshipRules, list[AssetEdge], dict[str, str]]:
     """Run full LLM enrichment pass.
 
     Returns:
         (updated_rules, new_edges_from_classification, descriptions)
     """
-    from ..config import LLMConfig
+    from ..config import LLMConfig, MCPConfig as MCPConfigClass
 
     if config is None:
         config = LLMConfig()
@@ -320,6 +409,18 @@ def llm_enrich(
     describe_model = config.tasks.describe or config.model_id
     llm_region = config.region or region
 
+    # Set up MCP client if configured
+    mcp_client = None
+    mcp_tools = None
+    if mcp_config and mcp_config.enabled:
+        pool = MCPPool.from_config(mcp_config)
+        raw_tools = pool.list_tools()
+        if raw_tools:
+            mcp_client = pool
+            mcp_tools = [{"toolSpec": t} for t in raw_tools]
+            logger.info("MCP enabled with %d tools from %d servers",
+                        len(mcp_tools), len(pool._clients))
+
     logger.info("LLM enrichment starting (classify=%s, describe=%s, region=%s, nodes=%d, candidates=%d)",
                 classify_model, describe_model, llm_region, len(nodes), len(rules.candidates()))
 
@@ -332,7 +433,10 @@ def llm_enrich(
         classifications = classify_properties(session, llm_region, nodes, classify_model,
                                               max_batch=config.max_nodes_per_batch,
                                               temperature=config.temperature,
-                                              system_prompt=config.system_prompt)
+                                              system_prompt=config.system_prompt,
+                                              prompts_config=prompts_config,
+                                              mcp_client=mcp_client,
+                                              mcp_tools=mcp_tools)
         calls_made += 1
         for c in classifications:
             if c.get("is_relationship") and c.get("confidence", 0) >= 0.7:
@@ -362,7 +466,8 @@ def llm_enrich(
         descriptions = generate_descriptions(session, llm_region, nodes, describe_model,
                                              max_batch=config.max_nodes_per_batch,
                                              temperature=config.temperature,
-                                             system_prompt=config.system_prompt)
+                                             system_prompt=config.system_prompt,
+                                             prompts_config=prompts_config)
         calls_made += 1
 
     logger.info("LLM enrichment complete: %d rules, %d descriptions, %d API calls",

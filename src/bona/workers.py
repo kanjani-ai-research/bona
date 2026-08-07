@@ -81,3 +81,46 @@ def run_parallel(tasks: list[tuple[str, Callable, list]], max_workers: int = DEF
                 results[name] = ([], [])  # empty nodes, edges
 
     return results
+
+
+def run_providers_parallel(
+    providers: list,
+    max_workers: int = DEFAULT_MAX_WORKERS,
+) -> "DiscoveryResult":
+    """Run multiple providers in parallel and merge results.
+
+    Args:
+        providers: list of AssetProvider instances
+        max_workers: thread pool size (default 4)
+
+    Returns:
+        Merged DiscoveryResult with all nodes/edges from all providers.
+    """
+    from .schema.model import DiscoveryResult
+
+    if not providers:
+        return DiscoveryResult(resources=[], relationships=[])
+
+    if len(providers) == 1:
+        return providers[0].discover()
+
+    tasks = [(p.name or p.__class__.__name__, p.discover, []) for p in providers]
+    results_map = run_parallel(tasks, max_workers=max_workers)
+
+    all_nodes = []
+    all_edges = []
+    total_ms = 0
+
+    for name, result in results_map.items():
+        if isinstance(result, DiscoveryResult):
+            all_nodes.extend(result.resources)
+            all_edges.extend(result.relationships)
+            total_ms += getattr(result, "duration_ms", 0)
+        elif isinstance(result, tuple) and len(result) == 2:
+            all_nodes.extend(result[0])
+            all_edges.extend(result[1])
+
+    logger.info("Parallel discovery complete: %d providers, %d nodes, %d edges, %dms",
+                len(providers), len(all_nodes), len(all_edges), total_ms)
+
+    return DiscoveryResult(resources=all_nodes, relationships=all_edges, duration_ms=total_ms)

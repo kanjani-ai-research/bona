@@ -45,3 +45,42 @@ llm:
   #   classify: us.anthropic.claude-sonnet-4-5-20250929-v1:0   # Model for resource classification
   #   validate: us.anthropic.claude-sonnet-4-5-20250929-v1:0   # Model for validation checks
   #   describe: us.amazon.nova-lite-v1:0                       # Model for generating descriptions (cheaper/faster)
+
+# ─── MCP Configuration ───────────────────────────────────────────────────────
+# Model Context Protocol servers — gives the LLM access to tools during enrichment.
+# Supports multiple servers (AWS MCP, internal CMDB, custom APIs).
+mcp:
+  enabled: true
+  # Legacy single-server (backward compat):
+  # server_url: "http://localhost:3000"
+  # command: "npx @aws/mcp-server"
+
+  # Multi-server (recommended):
+  servers:
+    - name: aws                              # AWS MCP Server
+      server_url: "http://localhost:3000"
+      # command: "npx @aws/mcp-server"       # Alternative: stdio transport
+    - name: cmdb                             # Your internal CMDB
+      command: "npx @company/cmdb-mcp-server"
+      tool_filter:                           # Only expose these tools to the LLM
+        - lookup_asset
+        - get_owner
+    # - name: servicenow
+    #   server_url: "http://localhost:4000"
+    #   enabled: false                       # Disable without removing
+
+# ─── Prompts Configuration ───────────────────────────────────────────────────
+# Control prompt sources per task — use local YAML templates or Bedrock managed prompts.
+prompts:
+  classify:
+    source: local                            # "local" = frameworks/prompts/*.yaml
+    local_name: classify-relationships       # matches YAML filename or name field
+  system:
+    source: local
+    local_name: bona-system
+  # compliance_mapping:
+  #   source: local
+  #   local_name: compliance-mapping
+  # remediation:
+  #   source: local
+  #   local_name: remediation-guidance

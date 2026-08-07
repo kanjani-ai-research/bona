@@ -2,11 +2,11 @@
 
 ## Next Up
 
-- [ ] Wire PromptsConfig into LLM enrichment pipeline (use Bedrock managed prompts when configured)
-- [ ] MCP integration in LLM enrichment (Claude calls AWS APIs via MCP tools during reasoning)
-- [ ] Custom MCP server support for enrichment (user's own tools)
-- [ ] Enable + test Audit Manager in lab account
-- [ ] Parallel provider execution using workers.py ThreadPoolExecutor
+- [x] Wire PromptsConfig into LLM enrichment pipeline (use Bedrock managed prompts when configured)
+- [x] MCP integration in LLM enrichment (Claude calls AWS APIs via MCP tools during reasoning)
+- [x] Custom MCP server support for enrichment (user's own tools)
+- [x] ~~Enable + test Audit Manager in lab account~~ (deprecated by AWS, April 2026)
+- [x] Parallel provider execution using workers.py ThreadPoolExecutor
 - [ ] `bona export --format neo4jcsv` tested with actual Neptune import
 
 ## Future Plugins

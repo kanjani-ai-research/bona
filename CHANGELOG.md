@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-08-07
+
+### Added
+
+- **Custom MCP server support** — configure multiple MCP servers for LLM enrichment tool use (AWS, CMDB, custom APIs)
+- `MCPPool` class — aggregates tools from multiple servers, routes calls by tool name, supports `tool_filter` per server
+- `MCPServerEntry` config — per-server `name`, `server_url`, `command`, `enabled`, `tool_filter`
+- **PromptsConfig wiring** — LLM enrichment loads prompts from YAML templates (with Bedrock managed prompt IDs) instead of hardcoded inline strings
+- `_resolve_prompt()` helper — loads managed prompts or falls back to inline (backward compatible)
+- **MCP agentic tool-use loop** — `_call_bedrock_with_tools()` runs Converse API with toolConfig, iterates up to 5 rounds
+- **Parallel provider execution** — `run_providers_parallel()` in `workers.py` runs multiple providers via ThreadPoolExecutor, merges DiscoveryResults
+- 23 new unit tests (9 LLM enrichment + 14 MCP pool/workers)
+
+### Changed
+
+- `MCPConfig` extended with `servers: list[MCPServerEntry]` (legacy single-server fields preserved)
+- `llm_enrich()` accepts `prompts_config` and `mcp_config` parameters
+- `classify_properties()` and `generate_descriptions()` accept `prompts_config`
+- `from_dict()` now parses `mcp.servers` and `prompts` config sections
+
+### Removed
+
+- Audit Manager backlog item (service deprecated by AWS, April 2026)
+
 ## [Unreleased]
 
 ### Added

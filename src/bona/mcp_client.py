@@ -141,3 +141,86 @@ class MCPClient:
             except Exception:
                 pass
         return []
+
+
+class MCPPool:
+    """Manages multiple MCP servers and aggregates their tools.
+
+    Routes tool calls to the correct server based on tool name.
+    Supports tool_filter per server to limit exposed tools.
+
+    Usage:
+        from bona.config import MCPConfig
+        pool = MCPPool.from_config(mcp_config)
+        tools = pool.list_tools()  # aggregated from all servers
+        result = pool.call_tool("my_custom_tool", {...})  # routed to correct server
+    """
+
+    def __init__(self):
+        self._clients: dict[str, MCPClient] = {}  # name -> client
+        self._tool_map: dict[str, str] = {}  # tool_name -> server_name
+        self._tool_filters: dict[str, list[str]] = {}  # server_name -> allowed tools
+        self._tools_cache: list[dict] = []
+
+    @classmethod
+    def from_config(cls, mcp_config) -> "MCPPool":
+        """Build pool from MCPConfig (supports legacy single-server and multi-server)."""
+        pool = cls()
+
+        # Legacy single-server support
+        if mcp_config.server_url or mcp_config.command:
+            client = MCPClient(server_url=mcp_config.server_url, command=mcp_config.command)
+            pool._clients["default"] = client
+            pool._tool_filters["default"] = []
+
+        # Multi-server entries
+        for entry in getattr(mcp_config, "servers", []):
+            if not entry.enabled:
+                continue
+            client = MCPClient(server_url=entry.server_url, command=entry.command)
+            pool._clients[entry.name] = client
+            pool._tool_filters[entry.name] = entry.tool_filter
+
+        return pool
+
+    def list_tools(self) -> list[dict]:
+        """Aggregate tools from all connected servers."""
+        if self._tools_cache:
+            return self._tools_cache
+
+        all_tools = []
+        for name, client in self._clients.items():
+            try:
+                tools = client.list_tools()
+                allowed = self._tool_filters.get(name, [])
+                for tool in tools:
+                    tool_name = tool.get("name", "")
+                    if allowed and tool_name not in allowed:
+                        continue
+                    self._tool_map[tool_name] = name
+                    all_tools.append(tool)
+            except Exception as e:
+                logger.warning("Failed to list tools from MCP server '%s': %s", name, e)
+
+        self._tools_cache = all_tools
+        logger.info("MCPPool: %d tools from %d servers", len(all_tools), len(self._clients))
+        return all_tools
+
+    def call_tool(self, tool_name: str, arguments: dict) -> Any:
+        """Route a tool call to the correct server."""
+        server_name = self._tool_map.get(tool_name)
+        if not server_name:
+            # Try all servers as fallback
+            for name, client in self._clients.items():
+                try:
+                    result = client.call_tool(tool_name, arguments)
+                    if result is not None:
+                        self._tool_map[tool_name] = name
+                        return result
+                except Exception:
+                    continue
+            logger.warning("No MCP server handles tool '%s'", tool_name)
+            return None
+
+        client = self._clients[server_name]
+        return client.call_tool(tool_name, arguments)

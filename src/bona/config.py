@@ -156,12 +156,24 @@ class LLMTaskConfig:
 
 
 @dataclass
+class MCPServerEntry:
+    """A single MCP server entry."""
+
+    name: str = ""  # identifier (e.g. "aws", "cmdb", "servicenow")
+    server_url: str = ""  # HTTP transport
+    command: str = ""  # stdio transport
+    enabled: bool = True
+    tool_filter: list[str] = field(default_factory=list)  # if set, only expose these tools
+
+
+@dataclass
 class MCPConfig:
-    """MCP Server configuration."""
+    """MCP Server configuration — supports multiple servers."""
 
     enabled: bool = False
-    server_url: str = ""  # HTTP transport
-    command: str = ""  # stdio transport (e.g. "npx @aws/mcp-server")
+    server_url: str = ""  # Legacy single-server (HTTP)
+    command: str = ""  # Legacy single-server (stdio)
+    servers: list[MCPServerEntry] = field(default_factory=list)  # Multi-server list
 
 
 @dataclass
@@ -266,7 +278,36 @@ class BonaConfig:
             descriptions_path=learning_data.get("descriptions_path", ""),
         )
 
-        return cls(enrichment=enrichment, output=output, logging=log_cfg, schema_cache=schema_cache, graph_schema=graph_schema, llm=llm_cfg, learning=learning_cfg)
+        mcp_data = data.get("mcp", {})
+        servers_data = mcp_data.get("servers", [])
+        mcp_servers = [
+            MCPServerEntry(
+                name=s.get("name", ""),
+                server_url=s.get("server_url", ""),
+                command=s.get("command", ""),
+                enabled=s.get("enabled", True),
+                tool_filter=s.get("tool_filter", []),
+            )
+            for s in servers_data
+        ]
+        mcp_cfg = MCPConfig(
+            enabled=mcp_data.get("enabled", False),
+            server_url=mcp_data.get("server_url", ""),
+            command=mcp_data.get("command", ""),
+            servers=mcp_servers,
+        )
+
+        prompts_data = data.get("prompts", {})
+        _default_prompts = PromptsConfig()
+        prompts_cfg = PromptsConfig(
+            compliance_mapping=prompts_data.get("compliance_mapping", _default_prompts.compliance_mapping),
+            remediation=prompts_data.get("remediation", _default_prompts.remediation),
+            audit_summary=prompts_data.get("audit_summary", _default_prompts.audit_summary),
+            classify=prompts_data.get("classify", _default_prompts.classify),
+            system=prompts_data.get("system", _default_prompts.system),
+        )
+
+        return cls(enrichment=enrichment, output=output, logging=log_cfg, schema_cache=schema_cache, graph_schema=graph_schema, llm=llm_cfg, learning=learning_cfg, mcp=mcp_cfg, prompts=prompts_cfg)
 
     @classmethod
     def default(cls) -> "BonaConfig":
