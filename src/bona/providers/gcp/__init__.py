@@ -418,12 +418,13 @@ class GCPProvider(AssetProvider):
         return findings
 
     def discover_with_enrichment(self) -> DiscoveryResult:
-        """Full discovery with IAM + SCC enrichment.
+        """Full discovery with IAM + SCC + Recommender enrichment.
 
         Combines:
         1. Resource discovery (Cloud Asset Inventory)
         2. IAM policy edges (who can access what)
-        3. SCC findings (security issues)
+        3. SCC findings (security issues — requires org)
+        4. Recommender insights (over-permissioned, idle resources — no org needed)
         """
         # Base discovery
         result = self.discover()
@@ -432,9 +433,13 @@ class GCPProvider(AssetProvider):
         iam_edges = self.discover_iam_edges()
         all_edges = list(result.relationships) + iam_edges
 
-        # SCC findings
+        # SCC findings (gracefully skipped if no org)
         scc_nodes = self.discover_scc_findings()
         all_nodes = list(result.resources) + scc_nodes
+
+        # Recommender insights
+        insight_nodes = self.discover_recommender_insights()
+        all_nodes = all_nodes + insight_nodes
 
         # Create HAS_FINDING edges from findings to their affected resources
         resource_ids = {n.id for n in result.resources}
@@ -447,14 +452,99 @@ class GCPProvider(AssetProvider):
                     edge_type="HAS_FINDING",
                 ))
 
-        logger.info("GCP enriched discovery: %d nodes, %d edges (incl. %d IAM, %d findings)",
-                    len(all_nodes), len(all_edges), len(iam_edges), len(scc_nodes))
+        # Create HAS_INSIGHT edges
+        for insight in insight_nodes:
+            target_resource = insight.properties.get("targetResource", "")
+            if target_resource and target_resource in resource_ids:
+                all_edges.append(AssetEdge(
+                    source_id=target_resource,
+                    target_id=insight.id,
+                    edge_type="HAS_INSIGHT",
+                ))
+
+        logger.info("GCP enriched discovery: %d nodes, %d edges (IAM=%d, findings=%d, insights=%d)",
+                    len(all_nodes), len(all_edges), len(iam_edges), len(scc_nodes), len(insight_nodes))
 
         return DiscoveryResult(
             resources=all_nodes,
             relationships=all_edges,
             duration_ms=result.duration_ms,
         )
+
+    def discover_recommender_insights(self) -> list[AssetNode]:
+        """Discover Recommender API insights (IAM, cost, performance).
+
+        Works without an organization. Provides:
+        - Unused IAM permissions (SECURITY category)
+        - Over-provisioned resources
+        - Idle resources
+        """
+        insights = []
+        insight_types = [
+            ("google.iam.policy.Insight", "global"),
+            ("google.iam.serviceAccount.Insight", "global"),
+        ]
+
+        for insight_type, location in insight_types:
+            try:
+                import subprocess
+                cmd = ["gcloud", "recommender", "insights", "list",
+                       f"--project={self.project_id}",
+                       f"--location={location}",
+                       f"--insight-type={insight_type}",
+                       "--format=json", "--limit=200"]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                if result.returncode != 0:
+                    continue
+
+                items = json.loads(result.stdout) if result.stdout else []
+                for item in items:
+                    insight_name = item.get("name", "")
+                    category = item.get("category", "")
+                    state = item.get("stateInfo", {}).get("state", "")
+                    content = item.get("content", {})
+                    description = item.get("description", "")
+
+                    # Extract target resource
+                    target_resource = ""
+                    target_resources = item.get("targetResources", [])
+                    if target_resources:
+                        target_resource = target_resources[0]
+
+                    # Build properties
+                    props = {
+                        "category": category,
+                        "state": state,
+                        "insightType": insight_type,
+                        "description": description,
+                        "targetResource": target_resource,
+                        "severity": item.get("severity", ""),
+                    }
+                    # Add permission counts for IAM insights
+                    if content.get("currentTotalPermissionsCount"):
+                        props["totalPermissions"] = int(content["currentTotalPermissionsCount"])
+                    exercised = content.get("exercisedPermissions", [])
+                    if exercised:
+                        props["exercisedPermissions"] = len(exercised)
+
+                    node = AssetNode(
+                        id=insight_name,
+                        node_type="GCP::Recommender::Insight",
+                        name=f"{category}: {description[:60]}" if description else insight_name.rsplit("/", 1)[-1],
+                        provider="gcp",
+                        account_id=self.project_id,
+                        region=location,
+                        resource_type=f"recommender.googleapis.com/{insight_type}",
+                        state=state,
+                        properties=props,
+                    )
+                    insights.append(node)
+
+            except Exception as e:
+                logger.debug("Recommender insight type %s failed: %s", insight_type, e)
+
+        logger.info("GCP Recommender enrichment: %d insights", len(insights))
+        return insights
 
     def validate(self) -> list[str]:
         """Validate GCP credentials and project access."""
