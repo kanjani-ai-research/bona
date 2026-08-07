@@ -66,6 +66,19 @@ def main():
     schema_parser.add_argument("--s3-uri", default="", help="S3 URI to upload cached schemas (e.g. s3://bucket/schemas/)")
     schema_parser.add_argument("--validate", default="", help="Validate a nodes.json file against cached type schemas")
 
+    # scan command (run security/compliance queries against the graph)
+    scan_parser = subparsers.add_parser("scan", help="Run security and compliance queries against infrastructure")
+    scan_parser.add_argument("--profile", default="", help="AWS profile name")
+    scan_parser.add_argument("--region", default="us-east-1", help="AWS region (comma-separated for multi-region)")
+    scan_parser.add_argument("--types", default="", help="Resource type filter (comma-separated, globs supported)")
+    scan_parser.add_argument("--max-resources", type=int, default=10000, help="Safety cap on resources")
+    scan_parser.add_argument("--tags", default="", help="Filter queries by tag (comma-separated: security,compliance,bedrock)")
+    scan_parser.add_argument("--names", default="", help="Filter queries by name (comma-separated)")
+    scan_parser.add_argument("--min-score", type=float, default=0, help="Minimum score threshold for findings")
+    scan_parser.add_argument("--enrich", nargs="?", const="soft", choices=["soft", "hard"], default=None, help="Enable enrichment before scanning")
+    scan_parser.add_argument("--format", choices=["text", "json", "sarif"], default="text", help="Output format (default: text)")
+    scan_parser.add_argument("--list-queries", action="store_true", help="List all available queries and exit")
+
     args = parser.parse_args()
 
     # Load config and configure logging
@@ -89,9 +102,122 @@ def main():
         _do_cache(args)
     elif args.command == "schema":
         _do_schema(args)
+    elif args.command == "scan":
+        _do_scan(args)
 
     # Flush logs to S3 if configured
     flush_to_s3()
+
+
+def _do_scan(args):
+    """Run security/compliance queries against infrastructure."""
+    import json as json_mod
+    from .providers.aws.aws_provider import AWSProvider
+    from .scan.engine import run_scan
+    from .scan.queries import BUILTIN_QUERIES
+    from .config import load_config, EnrichmentConfig
+
+    logger = logging.getLogger(__name__)
+
+    # List queries mode
+    if args.list_queries:
+        print(f"\nAvailable queries ({len(BUILTIN_QUERIES)}):\n")
+        print(f"{'Name':<30} {'Score':<6} {'Tags':<30} Title")
+        print(f"{'-'*30} {'-'*6} {'-'*30} {'-'*40}")
+        for q in sorted(BUILTIN_QUERIES, key=lambda x: x.name):
+            tags = ", ".join(q.tags)
+            print(f"{q.name:<30} {q.score:<6} {tags:<30} {q.title}")
+        return
+
+    cfg = load_config(args.config if hasattr(args, 'config') else None)
+
+    # Parse regions
+    regions = [r.strip() for r in args.region.split(",") if r.strip()]
+    type_filter = [t.strip() for t in args.types.split(",") if t.strip()] or None
+    tags = [t.strip() for t in args.tags.split(",") if t.strip()] or None
+    names = [n.strip() for n in args.names.split(",") if n.strip()] or None
+
+    all_findings = []
+
+    for region in regions:
+        # Discover resources
+        provider = AWSProvider(
+            profile=args.profile,
+            region=region,
+            max_resources=args.max_resources,
+            resource_types=type_filter,
+        )
+
+        # Optional enrichment before scanning
+        if args.enrich:
+            provider.validate_schemas = True
+            provider.enrichment_config = EnrichmentConfig(enabled=True, mode=args.enrich)
+            if args.enrich == "hard":
+                provider.refresh_cache = True
+
+        result = provider.discover()
+
+        # Run scan
+        scan_result = run_scan(
+            nodes=result.resources,
+            edges=result.relationships,
+            queries=BUILTIN_QUERIES,
+            tags=tags,
+            names=names,
+            min_score=args.min_score,
+        )
+
+        all_findings.extend(scan_result.findings)
+
+        logger.info("Scan %s: %s", region, scan_result.summary())
+
+    # Output
+    if args.format == "json":
+        print(json_mod.dumps([f.to_dict() for f in all_findings], indent=2))
+    elif args.format == "sarif":
+        _print_sarif(all_findings)
+    else:
+        _print_text_findings(all_findings)
+
+
+def _print_text_findings(findings):
+    """Print findings in human-readable text format."""
+    if not findings:
+        print("\n  ✅ No findings. All clear.")
+        return
+
+    print(f"\n  ⚠️  {len(findings)} finding(s):\n")
+    for f in findings:
+        severity = "🔴" if f.score >= 9 else "🟠" if f.score >= 7 else "🟡" if f.score >= 4 else "⚪"
+        print(f"  {severity} [{f.score}] {f.title}")
+        print(f"      Resource: {f.resource_name} ({f.resource_type})")
+        if f.detail:
+            print(f"      Detail: {f.detail}")
+        if f.remediation:
+            print(f"      Fix: {f.remediation}")
+        print()
+
+
+def _print_sarif(findings):
+    """Print findings in SARIF format (for CI integration)."""
+    import json as json_mod
+    sarif = {
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "bona-scan", "version": "0.3.4"}},
+            "results": [
+                {
+                    "ruleId": f.query_name,
+                    "level": "error" if f.score >= 9 else "warning" if f.score >= 5 else "note",
+                    "message": {"text": f"{f.title}: {f.detail}"},
+                    "locations": [{"physicalLocation": {"artifactLocation": {"uri": f.resource_id}}}],
+                }
+                for f in findings
+            ],
+        }],
+    }
+    print(json_mod.dumps(sarif, indent=2))
 
 
 def _do_export(args):
