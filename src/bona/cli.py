@@ -43,6 +43,14 @@ def main():
     completion_parser = subparsers.add_parser("completion", help="Generate shell completion script")
     completion_parser.add_argument("shell", choices=["bash", "zsh", "fish"], help="Shell type")
 
+    # framework command (deploy compliance frameworks)
+    fw_parser = subparsers.add_parser("framework", help="Manage compliance frameworks (conformance packs)")
+    fw_parser.add_argument("action", choices=["list", "deploy", "download", "status"], help="Action to perform")
+    fw_parser.add_argument("--name", default="", help="Framework name (e.g. NIST-800-53, CIS-L1, PCI-DSS)")
+    fw_parser.add_argument("--profile", default="", help="AWS profile name")
+    fw_parser.add_argument("--region", default="us-east-1", help="AWS region")
+    fw_parser.add_argument("--all", action="store_true", help="Apply to all frameworks")
+
     # export command
     export_parser = subparsers.add_parser("export", help="Export Asset Property Graph (nodes.json + edges.json)")
     export_parser.add_argument("--profile", default="", help="AWS profile name (from ~/.aws/credentials)")
@@ -142,6 +150,8 @@ def main():
         _do_doctor(args)
     elif args.command == "completion":
         _do_completion(args)
+    elif args.command == "framework":
+        _do_framework(args)
     elif args.command == "export":
         _do_export(args)
     elif args.command == "types":
@@ -190,6 +200,76 @@ compdef _bona bona""")
         print("# bona fish completion — add to ~/.config/fish/completions/bona.fish")
         for cmd in cmds:
             print(f"complete -c bona -n '__fish_use_subcommand' -a '{cmd}'")
+
+
+def _do_framework(args):
+    """Manage compliance frameworks."""
+    from .framework import list_frameworks, deploy_framework, download_framework, get_framework_status, get_catalog
+
+    logger = logging.getLogger(__name__)
+
+    if args.action == "list":
+        catalog = get_catalog()
+        print(f"\n  Bona Frameworks (catalog v{catalog.get('version', '?')})\n")
+        print(f"  {'Name':<20} {'Version':<8} {'Rules':<6} Description")
+        print(f"  {'-'*20} {'-'*8} {'-'*6} {'-'*50}")
+        for fw in list_frameworks():
+            dl = "✅" if fw["has_template"] else "⬇️ "
+            print(f"  {dl} {fw['name']:<17} {fw['version']:<8} {fw['rules_count']:<6} {fw['description']}")
+        print(f"\n  Use: bona framework download --name <NAME>")
+        print(f"       bona framework deploy --name <NAME> --profile <PROFILE>")
+
+    elif args.action == "download":
+        if args.all:
+            for fw in list_frameworks():
+                result = download_framework(fw["name"])
+                status = result.get("status", result.get("error", ""))
+                print(f"  {fw['name']}: {status}")
+        elif args.name:
+            result = download_framework(args.name)
+            if "error" in result:
+                print(f"  ❌ {result['error']}")
+            else:
+                print(f"  ✅ Downloaded: {result['file']} ({result['size']} bytes)")
+        else:
+            print("  Specify --name <FRAMEWORK> or --all")
+
+    elif args.action == "deploy":
+        import boto3
+        session_kwargs = {"region_name": args.region}
+        if args.profile:
+            session_kwargs["profile_name"] = args.profile
+        session = boto3.Session(**session_kwargs)
+
+        if args.all:
+            for fw in list_frameworks():
+                if fw["has_template"]:
+                    result = deploy_framework(session, args.region, fw["name"])
+                    status = result.get("status", result.get("error", ""))
+                    print(f"  {fw['name']}: {status}")
+        elif args.name:
+            result = deploy_framework(session, args.region, args.name)
+            if "error" in result:
+                print(f"  ❌ {result['error']}")
+            else:
+                print(f"  ✅ Deployed: {result['pack_name']} (v{result['version']})")
+        else:
+            print("  Specify --name <FRAMEWORK> or --all")
+
+    elif args.action == "status":
+        import boto3
+        session_kwargs = {"region_name": args.region}
+        if args.profile:
+            session_kwargs["profile_name"] = args.profile
+        session = boto3.Session(**session_kwargs)
+
+        packs = get_framework_status(session, args.region)
+        if not packs:
+            print("\n  No conformance packs deployed. Run: bona framework deploy --name NIST-800-53")
+        else:
+            print(f"\n  Deployed Conformance Packs:\n")
+            for p in packs:
+                print(f"  {p['name']}: score={p['score']}% ({p['status']})")
 
 
 def _do_doctor(args):
