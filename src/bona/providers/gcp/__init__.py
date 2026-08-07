@@ -337,6 +337,125 @@ class GCPProvider(AssetProvider):
         """List available GCP resource types."""
         return [_to_node_type(t) for t in self.asset_types] if self.asset_types else []
 
+    def discover_iam_edges(self) -> list[AssetEdge]:
+        """Discover IAM policy bindings and create HAS_ROLE / CAN_ACCESS edges.
+
+        Uses Cloud Asset Inventory with content_type=IAM_POLICY to get
+        all IAM bindings across the project.
+        """
+        edges = []
+        try:
+            from google.cloud import asset_v1
+            client = asset_v1.AssetServiceClient()
+            request = asset_v1.ListAssetsRequest(
+                parent=self._scope,
+                content_type=asset_v1.ContentType.IAM_POLICY,
+            )
+            for asset in client.list_assets(request=request):
+                resource_id = asset.name or ""
+                if not asset.iam_policy:
+                    continue
+                for binding in asset.iam_policy.bindings:
+                    role = binding.role
+                    for member in binding.members:
+                        # Create edge: member -[HAS_ROLE]-> resource
+                        edges.append(AssetEdge(
+                            source_id=member,
+                            target_id=resource_id,
+                            edge_type="HAS_ROLE",
+                            properties={"role": role},
+                        ))
+            logger.info("GCP IAM enrichment: %d HAS_ROLE edges", len(edges))
+        except Exception as e:
+            logger.warning("GCP IAM enrichment failed: %s", e)
+        return edges
+
+    def discover_scc_findings(self) -> list[AssetNode]:
+        """Discover Security Command Center findings as graph nodes.
+
+        Each finding becomes a node with edges to the affected resource.
+        Requires SCC Standard or Premium tier to be activated.
+        """
+        findings = []
+        try:
+            import subprocess
+            cmd = ["gcloud", "scc", "findings", "list",
+                   f"projects/{self.project_id}/sources/-",
+                   "--format=json", "--limit=500"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode != 0:
+                logger.info("SCC findings not available (activate SCC in console): %s",
+                            result.stderr[:100] if result.stderr else "no output")
+                return []
+
+            import json as json_mod
+            items = json_mod.loads(result.stdout) if result.stdout else []
+            for item in items:
+                finding = item.get("finding", item)
+                node = AssetNode(
+                    id=finding.get("name", ""),
+                    node_type="GCP::SCC::Finding",
+                    name=finding.get("category", finding.get("name", "").rsplit("/", 1)[-1]),
+                    provider="gcp",
+                    account_id=self.project_id,
+                    region="global",
+                    resource_type="securitycenter.googleapis.com/Finding",
+                    state=finding.get("state", "ACTIVE"),
+                    properties={
+                        "category": finding.get("category", ""),
+                        "severity": finding.get("severity", ""),
+                        "resourceName": finding.get("resourceName", ""),
+                        "state": finding.get("state", ""),
+                        "createTime": finding.get("createTime", ""),
+                        "eventTime": finding.get("eventTime", ""),
+                        "findingClass": finding.get("findingClass", ""),
+                    },
+                )
+                findings.append(node)
+            logger.info("GCP SCC enrichment: %d findings", len(findings))
+        except Exception as e:
+            logger.warning("GCP SCC enrichment failed: %s", e)
+        return findings
+
+    def discover_with_enrichment(self) -> DiscoveryResult:
+        """Full discovery with IAM + SCC enrichment.
+
+        Combines:
+        1. Resource discovery (Cloud Asset Inventory)
+        2. IAM policy edges (who can access what)
+        3. SCC findings (security issues)
+        """
+        # Base discovery
+        result = self.discover()
+
+        # IAM enrichment
+        iam_edges = self.discover_iam_edges()
+        all_edges = list(result.relationships) + iam_edges
+
+        # SCC findings
+        scc_nodes = self.discover_scc_findings()
+        all_nodes = list(result.resources) + scc_nodes
+
+        # Create HAS_FINDING edges from findings to their affected resources
+        resource_ids = {n.id for n in result.resources}
+        for finding in scc_nodes:
+            resource_name = finding.properties.get("resourceName", "")
+            if resource_name and resource_name in resource_ids:
+                all_edges.append(AssetEdge(
+                    source_id=resource_name,
+                    target_id=finding.id,
+                    edge_type="HAS_FINDING",
+                ))
+
+        logger.info("GCP enriched discovery: %d nodes, %d edges (incl. %d IAM, %d findings)",
+                    len(all_nodes), len(all_edges), len(iam_edges), len(scc_nodes))
+
+        return DiscoveryResult(
+            resources=all_nodes,
+            relationships=all_edges,
+            duration_ms=result.duration_ms,
+        )
+
     def validate(self) -> list[str]:
         """Validate GCP credentials and project access."""
         errors = []
