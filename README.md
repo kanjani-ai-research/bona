@@ -113,7 +113,7 @@ bona export --profile myprofile --region us-east-1 --types "AWS::Bedrock::*"
 [Agent "support-bot"] ──HAS_KB──▶ [KnowledgeBase "product-docs"]
 ```
 
-See [docs/bedrock-discovery.md](docs/bedrock-discovery.md) for full details.
+See [docs/bedrock-discovery.md](https://github.com/evanerwee/bona/blob/main/docs/bedrock-discovery.md) for full details.
 
 ### Configuration File
 
@@ -189,7 +189,7 @@ The schema lives at **`~/.bona/graph-schema.json`** (configurable via `schema.pa
 }
 ```
 
-See [docs/graph-schema.md](docs/graph-schema.md) for full details.
+See [docs/graph-schema.md](https://github.com/evanerwee/bona/blob/main/docs/graph-schema.md) for full details.
 
 ### LLM Enrichment
 
@@ -229,7 +229,7 @@ llm_enrichment:
 { "description": "Production API handler Lambda in VPC, triggered by API Gateway, with DynamoDB access" }
 ```
 
-See [docs/llm-enrichment.md](docs/llm-enrichment.md) for full details.
+See [docs/llm-enrichment.md](https://github.com/evanerwee/bona/blob/main/docs/llm-enrichment.md) for full details.
 
 ### Plugins
 
@@ -273,7 +273,7 @@ my_provider = "my_provider.plugin"
 | `bona_supplemental_providers` | Add supplemental enrichment providers (hardware specs, pricing, etc.) |
 | `bona_relationship_classifiers` | Add custom relationship classification logic |
 
-See [examples/bona-provider-example/](examples/bona-provider-example/) for a full working plugin example.
+See [examples/bona-provider-example/](https://github.com/evanerwee/bona/tree/main/examples/bona-provider-example) for a full working plugin example.
 
 ## CLI Reference
 
@@ -405,67 +405,52 @@ Edge types include:
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                            bona CLI                                  │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌─────────┐     ┌──────────────────┐     ┌───────────────────┐   │
-│  │  CLI    │────▶│   AWSProvider    │────▶│    Exporter       │   │
-│  │ (args)  │     │                  │     │                   │   │
-│  └─────────┘     │  1. Enumerate    │     │  • nodes.json     │   │
-│       │          │     types        │     │  • edges.json     │   │
-│       ▼          │  2. SQL query    │     │  • manifest.json   │   │
-│  ┌─────────┐    │     each type    │     │  • (S3 upload)    │   │
-│  │ Config  │    │  3. Extract      │     └───────────────────┘   │
-│  │(yaml/json)   │     relationships│                              │
-│  └─────────┘    │  4. Enrich       │◀──── CloudFormation          │
-│                  │     (type schemas)│      describe_type           │
-│                  │  5. Compliance   │                              │
-│                  └──────────────────┘                              │
-│                           │                                        │
-│                           ▼                                        │
-│                  ┌──────────────────┐                              │
-│                  │  Schema/Model    │                              │
-│                  │                  │                              │
-│                  │  • AssetNode     │                              │
-│                  │  • AssetEdge     │                              │
-│                  │  • DiscoveryResult│                             │
-│                  └──────────────────┘                              │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                      AWS APIs                                        │
-│                                                                     │
-│  AWS Config:                                                        │
-│  • select_resource_config (SQL)     — primary discovery method     │
-│  • select_aggregate_resource_config — multi-account via aggregator │
-│  • list_discovered_resources        — fallback enumeration         │
-│  • batch_get_resource_config        — fallback detail fetch        │
-│  • get_resource_config_history      — temporal graph (history cmd) │
-│  • describe_compliance_by_resource  — compliance findings          │
-│  • describe_config_rules            — rule metadata enrichment     │
-│                                                                     │
-│  CloudFormation:                                                    │
-│  • describe_type                    — resource type schemas        │
-│                                                                     │
-│  EC2 (supplemental):                                                │
-│  • describe_instance_types          — hardware specs               │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                   Downstream Consumers                               │
-│                                                                     │
-│  • Amazon Neptune              (bulk load / document-graph)         │
-│  • GraphRAG Toolkit            (graph-augmented retrieval)          │
-│  • Neo4j / any property graph  (via JSON import)                   │
-│  • Custom analytics            (jq, pandas, etc.)                  │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    CLI[bona CLI] --> Config[Config<br/>bona.yaml]
+    CLI --> Provider[AWSProvider]
+    
+    Provider --> Enumerate[1. Enumerate types]
+    Provider --> Query[2. SQL query + backfill]
+    Provider --> Extract[3. Extract relationships]
+    Provider --> Enrich[4. Enrich via plugins]
+    Provider --> Learn[5. Learn mode]
+    Provider --> LLM[6. LLM enrichment]
+    
+    Enrich --> Plugins[Plugin Manager<br/>pluggy]
+    Plugins --> TypeSchemas[Type Schemas<br/>CloudFormation]
+    Plugins --> RefProviders[Reference Providers<br/>Bedrock, EC2 specs]
+    Plugins --> External[External Plugins<br/>pip install]
+    
+    Provider --> Exporter[Exporter]
+    Exporter --> NodesJSON[nodes.json]
+    Exporter --> EdgesJSON[edges.json]
+    Exporter --> S3[S3 Upload]
+    
+    Learn --> GraphSchema[graph-schema.json<br/>semver]
+    Learn --> Rules[relationship-rules.json]
+    LLM --> Descriptions[descriptions.json]
+    
+    subgraph AWS APIs
+        ConfigAPI[AWS Config<br/>select_resource_config<br/>batch_get_resource_config]
+        CFN[CloudFormation<br/>describe_type]
+        Bedrock[Bedrock<br/>list_foundation_models<br/>bedrock-agent<br/>bedrock-agentcore]
+        BedrockRT[Bedrock Runtime<br/>Converse API]
+    end
+    
+    Query --> ConfigAPI
+    TypeSchemas --> CFN
+    RefProviders --> Bedrock
+    LLM --> BedrockRT
+    
+    subgraph Consumers
+        Neptune[Amazon Neptune]
+        GraphRAG[GraphRAG Toolkit]
+        Neo4j[Neo4j]
+        Analytics[jq / pandas]
+    end
+    
+    Exporter --> Consumers
 ```
 
 ## Multi-Account via Aggregator
@@ -478,7 +463,7 @@ bona export --profile management --region us-east-1 --aggregator MyOrgAggregator
 
 This uses `select_aggregate_resource_config` instead of `select_resource_config`, returning resources from all accounts enrolled in the aggregator. Each node retains its original `account_id` and `region`.
 
-See [docs/multi-account.md](docs/multi-account.md) for aggregator setup instructions.
+See [docs/multi-account.md](https://github.com/evanerwee/bona/blob/main/docs/multi-account.md) for aggregator setup instructions.
 
 ## Compatibility
 
