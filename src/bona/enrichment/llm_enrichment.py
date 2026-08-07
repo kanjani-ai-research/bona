@@ -240,6 +240,8 @@ def validate_candidates(
     max_batch: int = MAX_CANDIDATES_PER_CALL,
     temperature: float = 0.0,
     system_prompt: str = "",
+    mcp_client=None,
+    mcp_tools: Optional[list[dict]] = None,
 ) -> RelationshipRules:
     """Ask LLM to validate/correct unpromoted candidates."""
     candidates = rules.candidates()
@@ -280,7 +282,11 @@ Return JSON array:
 ]
 ```"""
 
-    text = _call_bedrock(session, region, model_id, prompt)
+    if mcp_client and mcp_tools:
+        text = _call_bedrock_with_tools(session, region, model_id, prompt, mcp_tools,
+                                        mcp_client, temperature, system_prompt)
+    else:
+        text = _call_bedrock(session, region, model_id, prompt)
     result = _parse_json_response(text)
 
     if not isinstance(result, list):
@@ -333,6 +339,8 @@ def generate_descriptions(
     temperature: float = 0.0,
     system_prompt: str = "",
     prompts_config=None,
+    mcp_client=None,
+    mcp_tools: Optional[list[dict]] = None,
 ) -> dict[str, str]:
     """Generate short descriptions for nodes that don't have one."""
     needs_description = [
@@ -366,7 +374,11 @@ Return JSON object mapping id → description:
 
 Keep descriptions concise (1 sentence, under 100 chars). Focus on purpose/role, not just restating the type."""
 
-    text = _call_bedrock(session, region, model_id, prompt)
+    if mcp_client and mcp_tools:
+        text = _call_bedrock_with_tools(session, region, model_id, prompt, mcp_tools,
+                                        mcp_client, temperature, system_prompt)
+    else:
+        text = _call_bedrock(session, region, model_id, prompt)
     result = _parse_json_response(text)
 
     if isinstance(result, dict):
@@ -458,7 +470,9 @@ def llm_enrich(
         rules = validate_candidates(session, llm_region, rules, validate_model,
                                     max_batch=config.max_candidates_per_call,
                                     temperature=config.temperature,
-                                    system_prompt=config.system_prompt)
+                                    system_prompt=config.system_prompt,
+                                    mcp_client=mcp_client,
+                                    mcp_tools=mcp_tools)
         calls_made += 1
 
     # 3. Generate descriptions
@@ -467,7 +481,9 @@ def llm_enrich(
                                              max_batch=config.max_nodes_per_batch,
                                              temperature=config.temperature,
                                              system_prompt=config.system_prompt,
-                                             prompts_config=prompts_config)
+                                             prompts_config=prompts_config,
+                                             mcp_client=mcp_client,
+                                             mcp_tools=mcp_tools)
         calls_made += 1
 
     logger.info("LLM enrichment complete: %d rules, %d descriptions, %d API calls",
