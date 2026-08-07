@@ -525,6 +525,56 @@ mcp:
 
 See [docs/llm-enrichment.md](https://github.com/evanerwee/bona/blob/main/docs/llm-enrichment.md) for full MCP documentation.
 
+## GCP Provider
+
+Bona discovers **Google Cloud** resources via Cloud Asset Inventory:
+
+```bash
+# Configure in bona.yaml
+gcp:
+  project_id: "my-project-id"
+  credentials: "~/.bona/gcp-key.json"
+```
+
+```python
+from bona.providers.gcp import GCPProvider
+
+provider = GCPProvider(project_id="my-project", credentials="~/.bona/gcp-key.json")
+result = provider.discover_with_enrichment()
+# Returns: resources + IAM edges + Recommender insights + hierarchy nodes
+```
+
+**What it discovers:**
+- All resources via Cloud Asset Inventory (Storage, Compute, Functions, PubSub, etc.)
+- IAM policy bindings as `HAS_ROLE` edges (who can access what)
+- Recommender insights (over-permissioned accounts, idle resources)
+- Security Command Center findings (requires GCP Organization)
+
+**Graph structure:**
+```
+Cloud::Root → Cloud::Provider (GCP) → Cloud::Project → Cloud::Region
+  ├── GCP::Storage::Bucket ──BELONGS_TO──▶ Region
+  ├── serviceAccount:sa@proj ──HAS_ROLE(viewer)──▶ Project
+  └── GCP::Recommender::Insight ◀──HAS_INSIGHT── over-permissioned account
+```
+
+## Drift Detection
+
+Compare two exports to detect infrastructure changes:
+
+```bash
+# Text summary
+bona diff ./export-monday ./export-friday
+
+# JSON output (for CI/CD pipelines)
+bona diff ./baseline ./current --format json
+
+# Show only modified resources with property-level changes
+bona diff ./old ./new --only modified
+```
+
+Drift detection uses `stable_id` for identity matching and `semantic_hash` for change detection — so renamed resources are tracked correctly across exports.
+
 ## Requirements
 
 - Python 3.11+

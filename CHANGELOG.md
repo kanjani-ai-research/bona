@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-08-07
+
+### Added
+
+- **`bona diff`** — drift detection between exports using stable_id + semantic_hash
+  - Detects added/removed/modified nodes and edges
+  - Per-property diff for modified resources
+  - CLI: `bona diff <old> <new> [--format text|json] [--only added|removed|modified]`
+- **GCP Provider** — Cloud Asset Inventory discovery
+  - Discovers all resources in a GCP project/folder/org
+  - Maps GCP asset types to `GCP::Service::Resource` node format
+  - Supports Python client (ADC) or gcloud CLI fallback
+  - `credentials` config field for service account key auto-loading
+- **GCP Enrichment** — IAM + Recommender insights (no org required)
+  - `discover_iam_edges()`: extracts IAM bindings as HAS_ROLE edges
+  - `discover_recommender_insights()`: over-permissioned accounts, idle resources
+  - `discover_with_enrichment()`: full pipeline (resources + IAM + SCC + Recommender)
+  - `discover_scc_findings()`: SCC findings (gracefully skipped without org)
+- **Graph Tree** — configurable CSP hierarchy nodes (`frameworks/graph_tree.yaml`)
+  - Per-CSP layers: Cloud::Root → Provider → Account/Project → Region
+  - Resources attach via BELONGS_TO edges
+  - Global resources (IAM, S3) attach to Account instead of Region
+  - User-overridable via `./graph_tree.yaml` or `~/.bona/graph_tree.yaml`
+  - `custom_layers` extension point for Organization/BusinessUnit/Environment
+  - Azure hierarchy pre-defined (Subscription → ResourceGroup)
+- `GCPConfig` dataclass with `project_id`, `credentials`, `asset_types`, `content_type`
+
+### Changed
+
+- AWS and GCP providers now emit hierarchy nodes automatically
+- `bona.yaml.example` updated with GCP config section
+
+## [0.6.1] — 2026-08-07
+
+(Patch release with all v0.6.0 features properly packaged)
+
 ## [0.6.0] — 2026-08-07
 
 ### Added

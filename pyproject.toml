@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bona"
-version = "0.6.1"
+version = "0.7.0"
 description = "Infrastructure Asset Property Graph — the Joern for cloud."
 requires-python = ">=3.11"
 license = "MIT"
@@ -27,6 +27,9 @@ dependencies = [
     "pydantic>=2.0",
     "pluggy>=1.4.0",
 ]
+
+[project.optional-dependencies]
+gcp = ["google-cloud-asset>=4.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/evanerwee/bona"
