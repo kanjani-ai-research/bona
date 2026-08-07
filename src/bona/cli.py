@@ -140,6 +140,14 @@ def main():
     query_parser.add_argument("--expr", default="", help="APGQL expression to evaluate (e.g. 'apg.nodes(\"AWS::EC2::*\").count')")
     query_parser.add_argument("--repl", action="store_true", help="Start interactive REPL")
 
+    # ─── Diff Command ────────────────────────────────────────────────────────────
+    diff_parser = subparsers.add_parser("diff", help="Compare two exports — detect drift (added/removed/modified resources)")
+    diff_parser.add_argument("old_path", help="Path to baseline export directory")
+    diff_parser.add_argument("new_path", help="Path to current export directory")
+    diff_parser.add_argument("--format", choices=["text", "json"], default="text", help="Output format (default: text)")
+    diff_parser.add_argument("--only", choices=["added", "removed", "modified"], default="", help="Show only a specific change type")
+    diff_parser.add_argument("--no-properties", action="store_true", help="Skip per-property diff for modified nodes")
+
     args = parser.parse_args()
 
     # Load config and configure logging
@@ -177,6 +185,8 @@ def main():
         _do_slice(args)
     elif args.command == "query":
         _do_query(args)
+    elif args.command == "diff":
+        _do_diff(args)
 
     # Flush logs to S3 if configured
     flush_to_s3()
@@ -525,6 +535,73 @@ def _do_query(args):
     else:
         print(f"  {apg.summary}")
         print(f"  Use --expr 'apg.nodes(...)...' or --repl for interactive mode")
+
+
+def _do_diff(args):
+    """Compare two export directories and report drift."""
+    import json as json_mod
+    from .diff import diff_exports
+
+    result = diff_exports(
+        args.old_path,
+        args.new_path,
+        include_properties=not args.no_properties,
+    )
+
+    if args.format == "json":
+        output = result.to_dict()
+        if args.only:
+            output["nodes"] = {args.only: output["nodes"].get(args.only, [])}
+            if args.only != "modified":
+                output["edges"] = {args.only: output["edges"].get(args.only, [])}
+        print(json_mod.dumps(output, indent=2, default=str))
+    else:
+        # Text output
+        print()
+        print(result.summary())
+
+        if args.only:
+            items = {"added": result.added_nodes, "removed": result.removed_nodes,
+                     "modified": result.modified_nodes}.get(args.only, [])
+            print(f"\n{'─' * 60}")
+            print(f"  {args.only.upper()} ({len(items)}):")
+            for n in items:
+                print(f"    {n.node_type}: {n.name or n.node_id}")
+                if n.change == "modified" and n.changed_properties:
+                    for k, v in list(n.changed_properties.items())[:5]:
+                        print(f"      {k}: {_short(v.get('old'))} → {_short(v.get('new'))}")
+        elif result.has_changes:
+            print(f"\n{'─' * 60}")
+            if result.added_nodes:
+                print(f"\n  ADDED ({len(result.added_nodes)}):")
+                for n in result.added_nodes[:20]:
+                    print(f"    + {n.node_type}: {n.name or n.node_id}")
+                if len(result.added_nodes) > 20:
+                    print(f"    ... and {len(result.added_nodes) - 20} more")
+
+            if result.removed_nodes:
+                print(f"\n  REMOVED ({len(result.removed_nodes)}):")
+                for n in result.removed_nodes[:20]:
+                    print(f"    - {n.node_type}: {n.name or n.node_id}")
+                if len(result.removed_nodes) > 20:
+                    print(f"    ... and {len(result.removed_nodes) - 20} more")
+
+            if result.modified_nodes:
+                print(f"\n  MODIFIED ({len(result.modified_nodes)}):")
+                for n in result.modified_nodes[:20]:
+                    print(f"    ~ {n.node_type}: {n.name or n.node_id}")
+                    if n.changed_properties:
+                        for k, v in list(n.changed_properties.items())[:3]:
+                            print(f"        {k}: {_short(v.get('old'))} → {_short(v.get('new'))}")
+                if len(result.modified_nodes) > 20:
+                    print(f"    ... and {len(result.modified_nodes) - 20} more")
+        print()
+
+
+def _short(val, max_len=40) -> str:
+    """Truncate a value for display."""
+    s = str(val) if val is not None else ""
+    return s[:max_len] + "..." if len(s) > max_len else s
 
 
 def _do_slice(args):

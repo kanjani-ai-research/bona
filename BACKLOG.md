@@ -20,7 +20,7 @@
 
 ## Enhancements
 
-- [ ] `bona diff` — compare two exports, detect drift (stable_id + semantic_hash)
+- [x] `bona diff` — compare two exports, detect drift (stable_id + semantic_hash)
 - [ ] `bona watch` — scheduled runs, detect changes over time
 - [ ] Typer CLI refactor (from argparse)
 - [ ] Docker Hub published image
