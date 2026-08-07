@@ -4,15 +4,34 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bona"
-version = "0.3.1"
+version = "0.3.2"
 description = "Infrastructure Asset Property Graph — the Joern for cloud."
 requires-python = ">=3.11"
 license = "MIT"
+readme = "README.md"
+authors = [
+    {name = "evanerwee"},
+]
+keywords = ["aws", "infrastructure", "property-graph", "joern", "asset-graph", "bedrock", "neptune"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: System :: Systems Administration",
+]
 dependencies = [
     "boto3>=1.35.0",
     "pydantic>=2.0",
     "pluggy>=1.4.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/evanerwee/bona"
+Repository = "https://github.com/evanerwee/bona"
+Documentation = "https://github.com/evanerwee/bona/tree/main/docs"
 
 [project.scripts]
 bona = "bona.cli:main"
