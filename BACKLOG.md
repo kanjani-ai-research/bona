@@ -7,6 +7,7 @@
 - [x] Custom MCP server support for enrichment (user's own tools)
 - [x] ~~Enable + test Audit Manager in lab account~~ (deprecated by AWS, April 2026)
 - [x] Parallel provider execution using workers.py ThreadPoolExecutor
+- [x] MCP-powered generic discovery provider (any AWS service, zero-code)
 - [ ] `bona export --format neo4jcsv` tested with actual Neptune import
 
 ## Future Plugins

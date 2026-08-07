@@ -69,6 +69,34 @@ mcp:
     #   server_url: "http://localhost:4000"
     #   enabled: false                       # Disable without removing
 
+  # ─── MCP Discovery ──────────────────────────────────────────────────────────
+  # Discover resources from ANY AWS service without writing a plugin.
+  # Each entry calls an AWS API via MCP and maps results to graph nodes.
+  discovery:
+    - service: guardduty
+      operation: ListDetectors
+      node_type: "AWS::GuardDuty::Detector"
+      id_field: "DetectorIds[]"
+      detail_operation: GetDetector
+      detail_params:
+        DetectorId: "$id"
+
+    - service: inspector2
+      operation: ListFindings
+      node_type: "AWS::Inspector2::Finding"
+      items_key: findings
+      id_field: findingArn
+      name_field: title
+
+    - service: securityhub
+      operation: GetFindings
+      node_type: "AWS::SecurityHub::Finding"
+      items_key: Findings
+      id_field: Id
+      name_field: Title
+      params:
+        MaxResults: 100
+
 # ─── Prompts Configuration ───────────────────────────────────────────────────
 # Control prompt sources per task — use local YAML templates or Bedrock managed prompts.
 prompts:

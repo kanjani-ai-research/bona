@@ -319,3 +319,79 @@ result = run_providers_parallel([aws_provider, gcp_provider], max_workers=4)
 ```
 
 Results are merged into a single `DiscoveryResult`. Failed providers are logged and skipped gracefully.
+
+## MCP Discovery Provider
+
+The `MCPProvider` enables **zero-code discovery** of any AWS service. Instead of writing a plugin per service, configure discovery entries in `bona.yaml`:
+
+```yaml
+mcp:
+  enabled: true
+  servers:
+    - name: aws
+      server_url: "http://localhost:3000"
+  discovery:
+    - service: guardduty
+      operation: ListDetectors
+      node_type: "AWS::GuardDuty::Detector"
+      id_field: "DetectorIds[]"
+      detail_operation: GetDetector
+      detail_params:
+        DetectorId: "$id"
+
+    - service: securityhub
+      operation: GetFindings
+      node_type: "AWS::SecurityHub::Finding"
+      items_key: Findings
+      id_field: Id
+      name_field: Title
+```
+
+### Discovery Entry Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `service` | yes | AWS service name (e.g., `guardduty`, `inspector2`, `s3`) |
+| `operation` | yes | API operation (e.g., `ListDetectors`, `GetFindings`) |
+| `node_type` | no | Explicit node type (auto-inferred from service/operation if omitted) |
+| `items_key` | no | Response key containing the item list (auto-detected if omitted) |
+| `id_field` | no | Field path for node ID (supports `Field[]` for list fields) |
+| `name_field` | no | Field path for node name |
+| `params` | no | Static parameters to pass to the API call |
+| `detail_operation` | no | Secondary API call to fetch full details per item |
+| `detail_params` | no | Params for detail call (`$id` replaced with item ID) |
+| `max_results` | no | Cap on items per entry (default: 100) |
+
+### How It Works
+
+1. Calls the MCP server with `service` + `operation` + `params`
+2. Extracts items from the response using `items_key` or auto-detection
+3. Optionally fetches details per item via `detail_operation`
+4. Maps each item to an `AssetNode` with extracted ID, name, and properties
+5. Handles pagination automatically (NextToken)
+
+### Tested Services
+
+| Service | Operation | Result |
+|---------|-----------|--------|
+| GuardDuty | ListDetectors → GetDetector | ✅ Detector with full config |
+| S3 | ListBuckets | ✅ All buckets discovered |
+| SecurityHub | GetFindings | ✅ Findings with titles/severity |
+| Inspector2 | ListFindings | ✅ Findings with ARNs |
+
+### Usage
+
+```python
+from bona.config import MCPConfig, MCPServerEntry
+from bona.providers.mcp import MCPProvider
+
+cfg = MCPConfig(
+    enabled=True,
+    servers=[MCPServerEntry(name="aws", server_url="http://localhost:3000")],
+    discovery=[
+        {"service": "guardduty", "operation": "ListDetectors", ...},
+    ],
+)
+provider = MCPProvider(cfg, region="us-east-1", account_id="123456789012")
+result = provider.discover()
+```
