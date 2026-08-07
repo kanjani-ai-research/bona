@@ -145,6 +145,20 @@ class GCPProvider(AssetProvider):
         # Infer edges from resource references
         edges = self._infer_edges(nodes)
 
+        # Build hierarchy nodes (Provider → Project → Region)
+        try:
+            from ...graph_tree import build_hierarchy
+            region = nodes[0].region if nodes else "global"
+            hierarchy_nodes, hierarchy_edges = build_hierarchy(
+                csp="gcp",
+                context={"project_id": self.project_id, "region": region},
+                resource_nodes=nodes,
+            )
+            nodes = hierarchy_nodes + nodes
+            edges = hierarchy_edges + edges
+        except Exception as e:
+            logger.debug("Hierarchy building skipped: %s", e)
+
         duration_ms = int((time.time() - start) * 1000)
         logger.info("GCP discovery complete: %d nodes, %d edges, %dms (scope=%s)",
                     len(nodes), len(edges), duration_ms, self._scope)

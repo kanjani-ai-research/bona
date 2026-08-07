@@ -1,0 +1,142 @@
+# Bona Graph Tree — defines CSP hierarchy nodes emitted during discovery.
+#
+# Each provider emits structural nodes (Provider, Account, Region, etc.) and
+# CONTAINS edges that connect resources to their place in the hierarchy.
+#
+# Override this file to:
+#   - Add custom layers (BusinessUnit, Environment, CostCenter)
+#   - Change edge types between layers
+#   - Filter which layers are emitted
+#   - Add metadata to hierarchy nodes
+#
+# Place overrides at: ./graph_tree.yaml or ~/.bona/graph_tree.yaml
+
+# ─── Hierarchy Definitions ────────────────────────────────────────────────────
+# Each CSP defines a tree of layers. Resources attach to the deepest matching layer.
+# Layers are emitted top-down; each layer node gets an edge to its parent.
+
+hierarchies:
+  aws:
+    layers:
+      - type: "Cloud::Provider"
+        id_template: "cloud::aws"
+        name: "Amazon Web Services"
+        edge_to_parent: null              # root — no parent
+        properties:
+          provider: aws
+          url: "https://aws.amazon.com"
+
+      - type: "Cloud::Account"
+        id_template: "cloud::aws::account::{account_id}"
+        name_template: "AWS Account {account_id}"
+        edge_to_parent: "HAS_ACCOUNT"
+        properties:
+          provider: aws
+
+      - type: "Cloud::Region"
+        id_template: "cloud::aws::{account_id}::{region}"
+        name_template: "{region}"
+        edge_to_parent: "HAS_REGION"
+        properties:
+          provider: aws
+
+    # Edge from resource → its deepest hierarchy node
+    resource_edge: "BELONGS_TO"
+    # Which hierarchy layer resources attach to (default: deepest = Region)
+    resource_attach_to: "Cloud::Region"
+
+  gcp:
+    layers:
+      - type: "Cloud::Provider"
+        id_template: "cloud::gcp"
+        name: "Google Cloud Platform"
+        edge_to_parent: null
+        properties:
+          provider: gcp
+          url: "https://cloud.google.com"
+
+      - type: "Cloud::Project"
+        id_template: "cloud::gcp::project::{project_id}"
+        name_template: "GCP Project {project_id}"
+        edge_to_parent: "HAS_PROJECT"
+        properties:
+          provider: gcp
+
+      - type: "Cloud::Region"
+        id_template: "cloud::gcp::{project_id}::{region}"
+        name_template: "{region}"
+        edge_to_parent: "HAS_REGION"
+        properties:
+          provider: gcp
+
+    resource_edge: "BELONGS_TO"
+    resource_attach_to: "Cloud::Region"
+
+  azure:
+    layers:
+      - type: "Cloud::Provider"
+        id_template: "cloud::azure"
+        name: "Microsoft Azure"
+        edge_to_parent: null
+        properties:
+          provider: azure
+          url: "https://azure.microsoft.com"
+
+      - type: "Cloud::Subscription"
+        id_template: "cloud::azure::subscription::{subscription_id}"
+        name_template: "Azure Subscription {subscription_id}"
+        edge_to_parent: "HAS_SUBSCRIPTION"
+        properties:
+          provider: azure
+
+      - type: "Cloud::ResourceGroup"
+        id_template: "cloud::azure::{subscription_id}::{resource_group}"
+        name_template: "{resource_group}"
+        edge_to_parent: "HAS_RESOURCE_GROUP"
+        properties:
+          provider: azure
+
+    resource_edge: "BELONGS_TO"
+    resource_attach_to: "Cloud::ResourceGroup"
+
+# ─── Custom Layers (user overrides) ──────────────────────────────────────────
+# Add custom intermediate layers between Provider and Account/Project.
+# Example: insert a BusinessUnit layer above Account.
+#
+# custom_layers:
+#   aws:
+#     - type: "Cloud::Organization"
+#       id_template: "cloud::aws::org::{org_id}"
+#       name_template: "Org {org_id}"
+#       insert_above: "Cloud::Account"    # insert between Provider and Account
+#       edge_to_parent: "HAS_ORG"
+#       edge_to_child: "HAS_ACCOUNT"
+#
+#     - type: "Cloud::BusinessUnit"
+#       id_template: "cloud::aws::bu::{bu_name}"
+#       name_template: "{bu_name}"
+#       insert_above: "Cloud::Account"
+#       edge_to_parent: "IN_ORG"
+#       edge_to_child: "OWNS_ACCOUNT"
+#       # Assign accounts to BUs via tags or mapping:
+#       assign_by_tag: "BusinessUnit"
+
+# ─── Global Settings ─────────────────────────────────────────────────────────
+settings:
+  # Emit hierarchy nodes during export (set false to disable)
+  enabled: true
+  # Include a "Cloud::Root" node above all providers (multi-cloud root)
+  emit_root: true
+  root_node:
+    type: "Cloud::Root"
+    id: "cloud::root"
+    name: "Cloud Infrastructure"
+    edge_to_children: "HAS_PROVIDER"
+  # Global resources (IAM, S3, etc.) attach to Account/Project instead of Region
+  global_resource_patterns:
+    - "AWS::IAM::*"
+    - "AWS::S3::Bucket"
+    - "AWS::Organizations::*"
+    - "AWS::CloudFront::*"
+    - "GCP::Iam::*"
+    - "GCP::Storage::Bucket"

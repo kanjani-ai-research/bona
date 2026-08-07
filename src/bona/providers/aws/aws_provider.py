@@ -222,6 +222,19 @@ class AWSProvider:
 
         duration = int((time.time() - t0) * 1000)
 
+        # Build hierarchy nodes (Provider → Account → Region)
+        try:
+            from ...graph_tree import build_hierarchy
+            hierarchy_nodes, hierarchy_edges = build_hierarchy(
+                csp="aws",
+                context={"account_id": self.account_id, "region": self.region},
+                resource_nodes=all_nodes,
+            )
+            all_nodes = hierarchy_nodes + all_nodes
+            all_edges = hierarchy_edges + all_edges
+        except Exception as e:
+            logger.debug("Hierarchy building skipped: %s", e)
+
         result = DiscoveryResult(
             provider="aws",
             account_id=self.account_id,

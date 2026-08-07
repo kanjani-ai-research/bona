@@ -122,8 +122,10 @@ class TestGCPProviderDiscover:
         with patch("bona.providers.gcp.GCPProvider._discover_via_client", side_effect=ImportError("no module")):
             result = provider.discover()
 
-        assert len(result.resources) == 1
-        node = result.resources[0]
+        # Filter out hierarchy nodes for resource assertions
+        resources = [n for n in result.resources if not n.node_type.startswith("Cloud::")]
+        assert len(resources) == 1
+        node = resources[0]
         assert node.node_type == "GCP::Storage::Bucket"
         assert node.name == "test-bucket"
         assert node.provider == "gcp"
@@ -147,8 +149,9 @@ class TestGCPProviderDiscover:
         with patch("bona.providers.gcp.GCPProvider._discover_via_client", side_effect=Exception("no adc")):
             result = provider.discover()
 
-        assert len(result.resources) == 2
-        types = {n.node_type for n in result.resources}
+        resources = [n for n in result.resources if not n.node_type.startswith("Cloud::")]
+        assert len(resources) == 2
+        types = {n.node_type for n in resources}
         assert "GCP::Storage::Bucket" in types
         assert "GCP::Iam::ServiceAccount" in types
 
@@ -160,4 +163,5 @@ class TestGCPProviderDiscover:
         with patch("bona.providers.gcp.GCPProvider._discover_via_client", side_effect=Exception()):
             result = provider.discover()
 
-        assert len(result.resources) == 0
+        resources = [n for n in result.resources if not n.node_type.startswith("Cloud::")]
+        assert len(resources) == 0
