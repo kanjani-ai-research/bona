@@ -174,6 +174,7 @@ class MCPConfig:
     server_url: str = ""  # Legacy single-server (HTTP)
     command: str = ""  # Legacy single-server (stdio)
     servers: list[MCPServerEntry] = field(default_factory=list)  # Multi-server list
+    discovery: list[dict] = field(default_factory=list)  # MCP discovery entries
 
 
 @dataclass
@@ -295,6 +296,7 @@ class BonaConfig:
             server_url=mcp_data.get("server_url", ""),
             command=mcp_data.get("command", ""),
             servers=mcp_servers,
+            discovery=mcp_data.get("discovery", []),
         )
 
         prompts_data = data.get("prompts", {})
