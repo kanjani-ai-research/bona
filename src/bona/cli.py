@@ -37,6 +37,7 @@ def main():
     export_parser.add_argument("--enrich", nargs="?", const="soft", choices=["soft", "hard"], default=None, help="Enrich nodes with type schema validation (soft=cached, hard=re-fetch). Default: disabled. If flag given without value: soft")
     export_parser.add_argument("--learn", action="store_true", help="Learn mode: update graph schema (node/edge types) from discoveries")
     export_parser.add_argument("--llm-enrich", action="store_true", help="Use Bedrock LLM to classify properties, validate relationships, generate descriptions")
+    export_parser.add_argument("--format", choices=["json", "neo4jcsv", "graphml", "dot"], default="json", help="Output format (default: json)")
 
     # cache command
     cache_parser = subparsers.add_parser("cache", help="Pre-populate local cache (instance types, etc.)")
@@ -380,6 +381,20 @@ def _do_export(args):
         print(f"\n  ✅ {result.summary()}")
         print(f"  📁 {output_dir}/nodes.json ({manifest['node_count']} nodes)")
         print(f"  📁 {output_dir}/edges.json ({manifest['edge_count']} edges)")
+
+        # Additional format exports
+        if args.format != "json":
+            from .formats import export_neo4jcsv, export_graphml, export_dot
+            fmt_dir = f"{output_dir}/{args.format}"
+            if args.format == "neo4jcsv":
+                export_neo4jcsv(result.resources, result.relationships, fmt_dir)
+                print(f"  📁 {fmt_dir}/nodes.csv + relationships.csv")
+            elif args.format == "graphml":
+                export_graphml(result.resources, result.relationships, fmt_dir)
+                print(f"  📁 {fmt_dir}/graph.graphml")
+            elif args.format == "dot":
+                export_dot(result.resources, result.relationships, fmt_dir)
+                print(f"  📁 {fmt_dir}/graph.dot")
 
         # Optional S3 upload (CLI flag > config)
         s3_uri = args.s3_uri or cfg.output.s3_uri
