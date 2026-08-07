@@ -15,15 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PromptsConfig wiring** — LLM enrichment loads prompts from YAML templates (with Bedrock managed prompt IDs) instead of hardcoded inline strings
 - `_resolve_prompt()` helper — loads managed prompts or falls back to inline (backward compatible)
 - **MCP agentic tool-use loop** — `_call_bedrock_with_tools()` runs Converse API with toolConfig, iterates up to 5 rounds
-- **Parallel provider execution** — `run_providers_parallel()` in `workers.py` runs multiple providers via ThreadPoolExecutor, merges DiscoveryResults
-- 23 new unit tests (9 LLM enrichment + 14 MCP pool/workers)
+- **MCP tool-use on all enrichment tasks** — classify, validate, and describe all use MCP tools when available
+- **MCP Discovery Provider** — generic config-driven provider discovers any AWS service via MCP (zero plugin code)
+- `MCPProvider` with `mcp.discovery[]` config — supports items_key, detail fetches, pagination, auto-ID detection
+- **Neptune CSV export** — `bona export --format neptunecsv` produces `~id`, `~label`, `~from`, `~to` headers for Neptune bulk loader
+- Property type annotations in Neptune CSV (`:String`, `:Int`, `:Bool`, `:Double`)
+- **Parallel provider execution** — `run_providers_parallel()` in `workers.py` runs multiple providers via ThreadPoolExecutor
+- Integration test suite for live MCP server (`test_mcp_integration.py`)
+- 55 new unit tests across 4 test files
 
 ### Changed
 
-- `MCPConfig` extended with `servers: list[MCPServerEntry]` (legacy single-server fields preserved)
+- `MCPConfig` extended with `servers: list[MCPServerEntry]` and `discovery: list[dict]`
 - `llm_enrich()` accepts `prompts_config` and `mcp_config` parameters
-- `classify_properties()` and `generate_descriptions()` accept `prompts_config`
-- `from_dict()` now parses `mcp.servers` and `prompts` config sections
+- All three LLM tasks (`classify`, `validate`, `describe`) accept MCP client/tools params
+- `from_dict()` now parses `mcp.servers`, `mcp.discovery`, and `prompts` config sections
+- CLI format choices now include `neptunecsv`
 
 ### Removed
 

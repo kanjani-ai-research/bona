@@ -34,6 +34,9 @@ bona export --profile myprofile --region us-east-1 --include-compliance
 
 # Upload to S3
 bona export --profile myprofile --region us-east-1 --s3-uri s3://my-bucket/apg/
+
+# Export for Neptune bulk loader
+bona export --profile myprofile --region us-east-1 --format neptunecsv
 ```
 
 ### History — temporal graph (config changes over time)
@@ -307,6 +310,7 @@ Commands:
 | `--enrich` | disabled | Enable type schema enrichment (`soft` or `hard`). If flag given without value: `soft` |
 | `--learn` | false | Update graph schema with discovered node/edge types (writes `~/.bona/graph-schema.json`) |
 | `--llm-enrich` | false | Enable LLM enrichment via Bedrock (classify relationships, generate descriptions) |
+| `--format` | json | Output format: `json`, `neptunecsv`, `neo4jcsv`, `graphml`, `dot` |
 | `--refresh-cache` | false | Force refresh of all cached data from AWS |
 
 ### `bona schema`
@@ -469,11 +473,57 @@ See [docs/multi-account.md](https://github.com/evanerwee/bona/blob/main/docs/mul
 
 | Consumer | How to use |
 |----------|-----------|
-| **Amazon Neptune** | Bulk load via `neptune-export` or convert to CSV with provided scripts |
+| **Amazon Neptune** | `bona export --format neptunecsv` → upload CSVs to S3 → Neptune bulk loader |
 | **GraphRAG Toolkit** | Feed `nodes.json` as document-graph source for graph-augmented RAG |
-| **Neo4j** | Import JSON via `apoc.load.json` or convert to Cypher |
+| **Neo4j** | `bona export --format neo4jcsv` or import JSON via `apoc.load.json` |
 | **document-graph** | Native format — flat JSON nodes with typed edges |
 | **jq / pandas** | Standard JSON — pipe through `jq` or load with `pd.read_json()` |
+
+## MCP Integration
+
+Bona integrates with [MCP (Model Context Protocol)](https://github.com/awslabs/mcp) servers for two purposes:
+
+### 1. LLM Tool Use During Enrichment
+
+When MCP is enabled, Claude can call AWS APIs during reasoning to make better classification decisions:
+
+```yaml
+mcp:
+  enabled: true
+  servers:
+    - name: aws
+      server_url: "http://localhost:3000"
+    - name: cmdb
+      command: "npx @company/cmdb-mcp-server"
+      tool_filter: [lookup_asset, get_owner]
+```
+
+### 2. Zero-Code Discovery (MCPProvider)
+
+Discover resources from **any** AWS service without writing a plugin:
+
+```yaml
+mcp:
+  enabled: true
+  servers:
+    - name: aws
+      server_url: "http://localhost:3000"
+  discovery:
+    - service: guardduty
+      operation: ListDetectors
+      node_type: "AWS::GuardDuty::Detector"
+      id_field: "DetectorIds[]"
+      detail_operation: GetDetector
+      detail_params: {DetectorId: "$id"}
+    - service: securityhub
+      operation: GetFindings
+      node_type: "AWS::SecurityHub::Finding"
+      items_key: Findings
+      id_field: Id
+      name_field: Title
+```
+
+See [docs/llm-enrichment.md](https://github.com/evanerwee/bona/blob/main/docs/llm-enrichment.md) for full MCP documentation.
 
 ## Requirements
 
