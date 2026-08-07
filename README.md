@@ -2,7 +2,7 @@
 
 **The Joern for cloud** — builds an Asset Property Graph from AWS Config and exports Joern-compatible `nodes.json` + `edges.json`.
 
-Bona discovers your cloud infrastructure via AWS Config's advanced SQL queries and produces a typed property graph that can be loaded into [Joern](https://joern.io), [Amazon Neptune](https://aws.amazon.com/neptune/), the [GraphRAG Toolkit](https://github.com/awslabs/graphrag-toolkit), or any tool that consumes the document-graph format.
+Bona discovers your cloud infrastructure via AWS Config's advanced SQL queries and produces a typed property graph that can be loaded into [Amazon Neptune](https://aws.amazon.com/neptune/), the [GraphRAG Toolkit](https://github.com/awslabs/graphrag-toolkit), [Neo4j](https://neo4j.com), or any tool that consumes flat JSON node/edge format. The output schema is inspired by [Joern](https://joern.io)'s `cpg_exporter.py` — same flat structure, applied to cloud assets instead of code.
 
 ## Installation
 
@@ -460,7 +460,6 @@ Edge types include:
 ┌─────────────────────────────────────────────────────────────────────┐
 │                   Downstream Consumers                               │
 │                                                                     │
-│  • Joern / joern-cpg           (nodes.json + edges.json)           │
 │  • Amazon Neptune              (bulk load / document-graph)         │
 │  • GraphRAG Toolkit            (graph-augmented retrieval)          │
 │  • Neo4j / any property graph  (via JSON import)                   │
@@ -485,7 +484,6 @@ See [docs/multi-account.md](docs/multi-account.md) for aggregator setup instruct
 
 | Consumer | How to use |
 |----------|-----------|
-| **Joern** | Load `nodes.json` + `edges.json` directly — schema matches `cpg_exporter.py` format |
 | **Amazon Neptune** | Bulk load via `neptune-export` or convert to CSV with provided scripts |
 | **GraphRAG Toolkit** | Feed `nodes.json` as document-graph source for graph-augmented RAG |
 | **Neo4j** | Import JSON via `apoc.load.json` or convert to Cypher |

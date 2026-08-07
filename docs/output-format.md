@@ -1,6 +1,6 @@
 # Output Format
 
-Bona exports a property graph as three JSON files compatible with Joern's `cpg_exporter.py` format.
+Bona exports a property graph as three JSON files. The format is inspired by Joern's `cpg_exporter.py` — flat JSON nodes with typed edges — applied to cloud infrastructure instead of code.
 
 ## Files
 
