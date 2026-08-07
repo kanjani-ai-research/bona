@@ -139,6 +139,9 @@ output:
 
 schema_cache:
   s3_uri: s3://my-bucket/schemas/
+
+learning:
+  s3_uri: s3://my-bucket/bona-learning/  # uploads graph-schema, rules, descriptions
 ```
 
 Place as `./bona.yaml` (project-local), `~/.bona/config.yaml` (user-level), or pass `--config path/to/bona.yaml`.
@@ -227,6 +230,50 @@ llm_enrichment:
 ```
 
 See [docs/llm-enrichment.md](docs/llm-enrichment.md) for full details.
+
+### Plugins
+
+Bona uses a **pluggy-based plugin system** that lets you add new providers, supplemental enrichers, and relationship classifiers without modifying core bona code.
+
+**Install a plugin:**
+
+```bash
+pip install bona-provider-xxx
+```
+
+Plugins are auto-discovered via Python entry points — no config changes needed.
+
+**Create a plugin:**
+
+```python
+# my_provider/plugin.py
+import bona.hookspecs
+from pluggy import HookimplMarker
+
+hookimpl = HookimplMarker("bona")
+
+@hookimpl
+def bona_reference_providers():
+    """Return a list of ReferenceProvider instances."""
+    return [MyCustomProvider()]
+```
+
+Register via `pyproject.toml`:
+
+```toml
+[project.entry-points."bona"]
+my_provider = "my_provider.plugin"
+```
+
+**Available hooks:**
+
+| Hook | Purpose |
+|------|---------|
+| `bona_reference_providers` | Add reference data providers (type definitions, external metadata) |
+| `bona_supplemental_providers` | Add supplemental enrichment providers (hardware specs, pricing, etc.) |
+| `bona_relationship_classifiers` | Add custom relationship classification logic |
+
+See [examples/bona-provider-example/](examples/bona-provider-example/) for a full working plugin example.
 
 ## CLI Reference
 

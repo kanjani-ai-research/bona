@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bedrock Platform resources (Guardrails, Prompt Routers, Batch Jobs, Automated Reasoning)
 - Bedrock AgentCore discovery (Runtimes, Gateways, Registries, Memories, Workload Identities)
 - Bedrock Mantle availability detection on ON_DEMAND models with multi-region support
+- Plugin system via pluggy — external packages can register providers via entry_points
+- Hook specs: `bona_reference_providers`, `bona_supplemental_providers`, `bona_relationship_classifiers`
+- Example plugin at `examples/bona-provider-example/` with CostCenter provider and URL classifier
+- Descriptions cache (`~/.bona/descriptions.json`) — persists LLM-generated descriptions across runs
+- S3 upload for all learning artifacts via `learning.s3_uri` config
+- `learning` config section for centralized control of artifact storage
 
 ### Changed
 
@@ -34,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Logging uses structured module (`bona.logging`) instead of print statements
 - Relationship learning now has two layers: pattern matching + LLM classification
 - Reference providers are a new category separate from supplemental providers
+- Providers now loaded dynamically via pluggy plugin manager (backward compatible)
 
 ## [0.1.0] — 2026-08-05
 
