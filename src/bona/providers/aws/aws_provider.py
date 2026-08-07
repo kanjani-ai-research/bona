@@ -139,9 +139,16 @@ class AWSProvider:
             all_nodes.extend(ref_nodes)
             all_edges.extend(enrich_edges)
 
-        # 5. Optional compliance findings
+        # 5. Compliance discovery (conformance packs, rules, PASSES/FAILS edges)
         findings = []
         if self.include_compliance:
+            from bona.compliance import discover_compliance
+            compliance_nodes, compliance_edges = discover_compliance(
+                self._session, self.region, all_nodes, aggregator=self.aggregator,
+            )
+            all_nodes.extend(compliance_nodes)
+            all_edges.extend(compliance_edges)
+            # Legacy findings (kept for backward compat)
             findings = self._get_compliance_findings()
 
         # 6. Learn mode — update graph schema from discoveries
