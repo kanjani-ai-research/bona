@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bona-provider-guardduty"
+version = "0.1.0"
+description = "Bona plugin — Amazon GuardDuty threat findings provider"
+requires-python = ">=3.11"
+dependencies = [
+    "bona>=0.4.0",
+]
+
+[project.entry-points."bona"]
+guardduty = "bona_provider_guardduty.plugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bona_provider_guardduty"]

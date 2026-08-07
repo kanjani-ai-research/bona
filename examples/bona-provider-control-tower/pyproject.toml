@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bona-provider-control-tower"
+version = "0.1.0"
+description = "Bona plugin — AWS Control Tower provider (landing zones, controls, baselines)"
+requires-python = ">=3.11"
+dependencies = [
+    "bona>=0.4.0",
+]
+
+[project.entry-points."bona"]
+control_tower = "bona_provider_control_tower.plugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bona_provider_control_tower"]
