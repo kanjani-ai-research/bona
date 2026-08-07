@@ -138,13 +138,42 @@ def load_relationship_rules(path: Optional[str] = None) -> RelationshipRules:
         return RelationshipRules()
 
 
-def save_relationship_rules(rules: RelationshipRules, path: Optional[str] = None) -> None:
+def save_relationship_rules(rules: RelationshipRules, path: Optional[str] = None, s3_uri: str = "", profile: str = "", region: str = "us-east-1") -> None:
+    """Save relationship rules to local file and optionally upload to S3."""
     rules_path = Path(path) if path else DEFAULT_RULES_PATH
     rules_path.parent.mkdir(parents=True, exist_ok=True)
     rules.last_updated = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    rules_path.write_text(json.dumps(rules.to_dict(), indent=2))
+    content = json.dumps(rules.to_dict(), indent=2)
+    rules_path.write_text(content)
     logger.info("Saved relationship rules: %d rules (%d promoted)",
                 len(rules.rules), len(rules.promoted_rules()))
+
+    if s3_uri:
+        _upload_to_s3(content, s3_uri, "relationship-rules.json", profile, region)
+
+
+def _upload_to_s3(content: str, s3_uri: str, filename: str, profile: str = "", region: str = "us-east-1") -> None:
+    """Upload content to S3."""
+    import boto3
+
+    if not s3_uri.startswith("s3://"):
+        return
+
+    parts = s3_uri[5:].split("/", 1)
+    bucket = parts[0]
+    prefix = parts[1].rstrip("/") if len(parts) > 1 else ""
+    key = f"{prefix}/{filename}" if prefix else filename
+
+    try:
+        session_kwargs = {"region_name": region}
+        if profile:
+            session_kwargs["profile_name"] = profile
+        session = boto3.Session(**session_kwargs)
+        s3 = session.client("s3")
+        s3.put_object(Bucket=bucket, Key=key, Body=content.encode("utf-8"), ContentType="application/json")
+        logger.info("Uploaded %s to s3://%s/%s", filename, bucket, key)
+    except Exception as e:
+        logger.warning("Failed to upload %s to S3: %s", filename, e)
 
 
 # ==================================================================

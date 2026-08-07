@@ -147,13 +147,19 @@ def _do_export(args):
         # Learn mode
         provider.learn_mode = args.learn
         if args.learn:
-            provider._graph_schema_path = cfg.graph_schema.path or ""
+            provider._graph_schema_path = cfg.graph_schema.path or cfg.learning.graph_schema_path or ""
             provider._graph_schema_s3_uri = cfg.graph_schema.s3_uri or ""
+            provider._learning_s3_uri = cfg.learning.s3_uri or ""
+            provider._learning_rules_path = cfg.learning.relationship_rules_path or ""
+            provider._learning_descriptions_path = cfg.learning.descriptions_path or ""
 
         # LLM enrichment
         provider.llm_enrich = args.llm_enrich
         if args.llm_enrich:
             provider._llm_config = cfg.llm
+            provider._learning_s3_uri = cfg.learning.s3_uri or ""
+            provider._learning_rules_path = cfg.learning.relationship_rules_path or ""
+            provider._learning_descriptions_path = cfg.learning.descriptions_path or ""
 
         result = provider.discover()
         all_results.append(result)

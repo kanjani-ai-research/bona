@@ -136,6 +136,17 @@ class GraphSchemaConfig:
 
 
 @dataclass
+class LearningConfig:
+    """Controls storage for all learning artifacts."""
+
+    s3_uri: str = ""  # S3 prefix for all learning outputs (graph-schema, rules, descriptions)
+    # Individual path overrides
+    graph_schema_path: str = ""
+    relationship_rules_path: str = ""
+    descriptions_path: str = ""
+
+
+@dataclass
 class LLMTaskConfig:
     """Model override per task."""
 
@@ -169,6 +180,7 @@ class BonaConfig:
     schema_cache: SchemaCacheConfig = field(default_factory=SchemaCacheConfig)
     graph_schema: GraphSchemaConfig = field(default_factory=GraphSchemaConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    learning: LearningConfig = field(default_factory=LearningConfig)
 
     @classmethod
     def from_dict(cls, data: dict) -> "BonaConfig":
@@ -224,7 +236,15 @@ class BonaConfig:
             ),
         )
 
-        return cls(enrichment=enrichment, output=output, logging=log_cfg, schema_cache=schema_cache, graph_schema=graph_schema, llm=llm_cfg)
+        learning_data = data.get("learning", {})
+        learning_cfg = LearningConfig(
+            s3_uri=learning_data.get("s3_uri", ""),
+            graph_schema_path=learning_data.get("graph_schema_path", ""),
+            relationship_rules_path=learning_data.get("relationship_rules_path", ""),
+            descriptions_path=learning_data.get("descriptions_path", ""),
+        )
+
+        return cls(enrichment=enrichment, output=output, logging=log_cfg, schema_cache=schema_cache, graph_schema=graph_schema, llm=llm_cfg, learning=learning_cfg)
 
     @classmethod
     def default(cls) -> "BonaConfig":

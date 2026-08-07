@@ -82,6 +82,9 @@ class AWSProvider:
         self._graph_schema_path = ""  # Local path override
         self._graph_schema_s3_uri = ""  # S3 URI for upload
         self._profile = profile  # Store for S3 uploads
+        self._learning_s3_uri = ""  # S3 prefix for all learning outputs
+        self._learning_rules_path = ""  # Local path override for rules
+        self._learning_descriptions_path = ""  # Local path override for descriptions
         self.llm_enrich = False  # Use LLM to classify/validate/describe
         self._llm_config = None  # LLMConfig from bona.yaml
 
@@ -155,33 +158,60 @@ class AWSProvider:
             save_graph_schema(
                 graph_schema,
                 path=schema_path,
-                s3_uri=self._graph_schema_s3_uri,
+                s3_uri=self._graph_schema_s3_uri or self._learning_s3_uri,
                 profile=self._profile,
                 region=self.region,
             )
 
             # Learn relationship rules (property → edge promotion)
-            rules = load_relationship_rules()
+            rules = load_relationship_rules(self._learning_rules_path or None)
             rules = learn_relationships(rules, all_nodes)
             learned_edges = apply_relationship_rules(rules, all_nodes)
             all_edges.extend(learned_edges)
-            save_relationship_rules(rules)
+            save_relationship_rules(
+                rules,
+                path=self._learning_rules_path or None,
+                s3_uri=self._learning_s3_uri,
+                profile=self._profile,
+                region=self.region,
+            )
 
         # 7. LLM enrichment — classify properties, validate rules, generate descriptions
         if self.llm_enrich:
             from bona.enrichment.llm_enrichment import llm_enrich
             from bona.relationship_learner import load_relationship_rules, save_relationship_rules
-            rules = load_relationship_rules()
-            rules, llm_edges, descriptions = llm_enrich(
+            from bona.descriptions_cache import load_descriptions, save_descriptions, merge_descriptions
+
+            rules = load_relationship_rules(self._learning_rules_path or None)
+            rules, llm_edges, new_descriptions = llm_enrich(
                 self._session, self.region, all_nodes, rules,
                 config=self._llm_config,
             )
             all_edges.extend(llm_edges)
-            save_relationship_rules(rules)
+            save_relationship_rules(
+                rules,
+                path=self._learning_rules_path or None,
+                s3_uri=self._learning_s3_uri,
+                profile=self._profile,
+                region=self.region,
+            )
+
+            # Merge and persist descriptions
+            existing_descriptions = load_descriptions(self._learning_descriptions_path or None)
+            all_descriptions = merge_descriptions(existing_descriptions, new_descriptions)
+            save_descriptions(
+                all_descriptions,
+                path=self._learning_descriptions_path or None,
+                s3_uri=self._learning_s3_uri,
+                profile=self._profile,
+                region=self.region,
+            )
+
             # Apply descriptions to nodes
             for node in all_nodes:
-                if node.id in descriptions:
-                    node.properties["_llm_description"] = descriptions[node.id]
+                desc = all_descriptions.get(node.id)
+                if desc:
+                    node.properties["_llm_description"] = desc
 
         duration = int((time.time() - t0) * 1000)
 
