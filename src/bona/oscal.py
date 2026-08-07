@@ -83,8 +83,15 @@ def _extract_prose(part: dict) -> str:
 
 
 def get_control(catalog: dict, control_id: str) -> Optional[dict]:
-    """Look up a control by ID (case-insensitive)."""
-    return catalog.get(control_id.upper())
+    """Look up a control by ID (case-insensitive, handles AC-2(1) and AC-2.1 formats)."""
+    cid = control_id.upper()
+    if cid in catalog:
+        return catalog[cid]
+    # Try dot format: AC-2(1) → AC-2.1
+    cid_dot = cid.replace("(", ".").replace(")", "")
+    if cid_dot in catalog:
+        return catalog[cid_dot]
+    return None
 
 
 def search_controls(catalog: dict, query: str, limit: int = 5) -> list[dict]:
@@ -116,21 +123,42 @@ def map_rule_to_controls(catalog: dict, rule_name: str, rule_description: str = 
         "tls": ["SC-8", "SC-23"],
         "password": ["IA-5", "AC-7"],
         "access-key": ["AC-2", "IA-5"],
+        "access_key": ["AC-2", "IA-5"],
         "mfa": ["IA-2"],
         "public": ["AC-3", "AC-4", "SC-7"],
         "logging": ["AU-2", "AU-3", "AU-6"],
         "cloudtrail": ["AU-2", "AU-3", "AU-12"],
+        "cloud-trail": ["AU-2", "AU-3", "AU-12"],
+        "cloud_trail": ["AU-2", "AU-3", "AU-12"],
+        "trail": ["AU-2", "AU-3"],
         "backup": ["CP-9", "CP-10"],
         "vpc": ["SC-7", "AC-4"],
         "security-group": ["AC-4", "SC-7"],
+        "security_group": ["AC-4", "SC-7"],
         "iam": ["AC-2", "AC-3", "AC-6"],
         "root": ["AC-6", "AC-2"],
         "rotation": ["IA-5", "SC-12"],
+        "rotated": ["IA-5", "SC-12"],
         "versioning": ["CP-9", "SI-7"],
         "kms": ["SC-12", "SC-13", "SC-28"],
         "waf": ["SC-7", "SI-3"],
         "guardduty": ["SI-4", "IR-4"],
         "config": ["CM-2", "CM-6", "CM-8"],
+        "readonly": ["AC-6", "AC-3", "CM-7"],
+        "read-only": ["AC-6", "AC-3", "CM-7"],
+        "read_only": ["AC-6", "AC-3", "CM-7"],
+        "container": ["CM-7", "AC-6", "SC-7"],
+        "ecs": ["CM-7", "AC-6", "SI-7"],
+        "lambda": ["AC-3", "AC-6", "SC-7"],
+        "s3": ["AC-3", "AC-4", "SC-28"],
+        "bucket": ["AC-3", "AC-4", "SC-28"],
+        "rds": ["SC-28", "AC-3", "SC-8"],
+        "db": ["SC-28", "AC-3"],
+        "secret": ["SC-28", "IA-5"],
+        "monitor": ["SI-4", "AU-6"],
+        "alarm": ["SI-4", "IR-4"],
+        "flow-log": ["AU-2", "AU-3", "SI-4"],
+        "flow_log": ["AU-2", "AU-3", "SI-4"],
     }
 
     matches = []
