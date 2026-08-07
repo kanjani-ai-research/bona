@@ -79,6 +79,21 @@ def main():
     scan_parser.add_argument("--format", choices=["text", "json", "sarif"], default="text", help="Output format (default: text)")
     scan_parser.add_argument("--list-queries", action="store_true", help="List all available queries and exit")
 
+    # slice command (subgraph extraction)
+    slice_parser = subparsers.add_parser("slice", help="Extract subgraph around a resource")
+    slice_parser.add_argument("--profile", default="", help="AWS profile name")
+    slice_parser.add_argument("--region", default="us-east-1", help="AWS region")
+    slice_parser.add_argument("--types", default="", help="Resource type filter for discovery")
+    slice_parser.add_argument("--max-resources", type=int, default=10000, help="Safety cap on resources")
+    slice_parser.add_argument("--enrich", nargs="?", const="soft", choices=["soft", "hard"], default=None, help="Enable enrichment")
+    slice_parser.add_argument("--resource", default="", help="Resource ID/ARN/name to slice around (neighborhood mode)")
+    slice_parser.add_argument("--depth", type=int, default=2, help="Hop depth for neighborhood/impact slice (default: 2)")
+    slice_parser.add_argument("--path", nargs=2, metavar=("SOURCE", "TARGET"), help="Find path between two resources")
+    slice_parser.add_argument("--type", dest="slice_type", default="", help="Extract all resources of a type (type mode)")
+    slice_parser.add_argument("--impact", default="", help="Resource to trace impact from")
+    slice_parser.add_argument("--direction", choices=["upstream", "downstream"], default="downstream", help="Impact direction (default: downstream)")
+    slice_parser.add_argument("--output-dir", default="./bona-slice", help="Output directory for slice")
+
     args = parser.parse_args()
 
     # Load config and configure logging
@@ -104,9 +119,74 @@ def main():
         _do_schema(args)
     elif args.command == "scan":
         _do_scan(args)
+    elif args.command == "slice":
+        _do_slice(args)
 
     # Flush logs to S3 if configured
     flush_to_s3()
+
+
+def _do_slice(args):
+    """Extract a subgraph slice around a resource."""
+    import json as json_mod
+    from pathlib import Path
+    from .providers.aws.aws_provider import AWSProvider
+    from .config import load_config, EnrichmentConfig
+    from .slice import neighborhood_slice, path_slice, type_slice, impact_slice
+
+    logger = logging.getLogger(__name__)
+    cfg = load_config(args.config if hasattr(args, 'config') else None)
+
+    type_filter = [t.strip() for t in args.types.split(",") if t.strip()] or None
+
+    # Discover resources
+    provider = AWSProvider(
+        profile=args.profile,
+        region=args.region,
+        max_resources=args.max_resources,
+        resource_types=type_filter,
+    )
+    if args.enrich:
+        provider.validate_schemas = True
+        provider.enrichment_config = EnrichmentConfig(enabled=True, mode=args.enrich)
+
+    result = provider.discover()
+
+    # Determine slice mode
+    if args.path:
+        slice_result = path_slice(result.resources, result.relationships, args.path[0], args.path[1])
+    elif args.slice_type:
+        slice_result = type_slice(result.resources, result.relationships, args.slice_type)
+    elif args.impact:
+        slice_result = impact_slice(result.resources, result.relationships, args.impact, args.direction, args.depth)
+    elif args.resource:
+        slice_result = neighborhood_slice(result.resources, result.relationships, args.resource, args.depth)
+    else:
+        logger.error("Specify one of: --resource, --path, --type, --impact")
+        return
+
+    logger.info("Slice: %s", slice_result.summary())
+
+    # Write output
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    nodes_out = [n.to_dict() for n in slice_result.nodes]
+    edges_out = [e.to_dict() for e in slice_result.edges]
+
+    (out_dir / "nodes.json").write_text(json_mod.dumps(nodes_out, indent=2, default=str))
+    (out_dir / "edges.json").write_text(json_mod.dumps(edges_out, indent=2, default=str))
+    (out_dir / "slice.json").write_text(json_mod.dumps({
+        "mode": slice_result.mode,
+        "root": slice_result.root,
+        "depth": slice_result.depth,
+        "node_count": slice_result.node_count,
+        "edge_count": slice_result.edge_count,
+    }, indent=2))
+
+    print(f"\n  {slice_result.summary()}")
+    print(f"  📁 {out_dir}/nodes.json ({slice_result.node_count} nodes)")
+    print(f"  📁 {out_dir}/edges.json ({slice_result.edge_count} edges)")
 
 
 def _do_scan(args):
