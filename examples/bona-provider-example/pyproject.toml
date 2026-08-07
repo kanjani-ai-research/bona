@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bona-provider-example"
+version = "0.1.0"
+description = "Example bona plugin — demonstrates how to add custom reference providers"
+requires-python = ">=3.11"
+dependencies = [
+    "bona>=0.3.0",
+]
+
+# This is the key: register as a bona plugin via entry_points
+[project.entry-points."bona"]
+example = "bona_provider_example.plugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bona_provider_example"]

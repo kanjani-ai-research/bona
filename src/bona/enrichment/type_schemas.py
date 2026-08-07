@@ -403,7 +403,11 @@ def enrich_with_type_schemas(
     supplemental_nodes: list[AssetNode] = []
     supplemental_edges: list[AssetEdge] = []
 
-    for resource_type, provider_fn in _SUPPLEMENTAL_PROVIDERS.items():
+    # Load supplemental providers from plugin system
+    from ..plugins import get_all_supplemental_providers
+    all_supplemental = get_all_supplemental_providers()
+
+    for resource_type, provider_fn in all_supplemental.items():
         # Check if this supplemental provider is enabled in config
         provider_key = _SUPPLEMENTAL_PROVIDER_KEYS.get(resource_type, "")
         if provider_key and not config.supplemental.get(provider_key, True):
@@ -413,13 +417,27 @@ def enrich_with_type_schemas(
             supplemental_nodes.extend(extra_nodes)
             supplemental_edges.extend(extra_edges)
 
+    # --- Step 4: Reference providers (service catalog data) ---
+    from ..plugins import get_all_reference_providers
+    all_reference = get_all_reference_providers()
+
+    reference_nodes: list[AssetNode] = []
+    reference_edges: list[AssetEdge] = []
+
+    for provider_key, provider_fn in all_reference.items():
+        if not config.supplemental.get(provider_key, True):
+            continue
+        ref_nodes, ref_edges = provider_fn(session, region, resources, refresh_cache)
+        reference_nodes.extend(ref_nodes)
+        reference_edges.extend(ref_edges)
+
     # Combine all reference nodes and edges
-    all_ref_nodes = type_def_nodes + supplemental_nodes
-    all_edges = instance_of_edges + supplemental_edges
+    all_ref_nodes = type_def_nodes + supplemental_nodes + reference_nodes
+    all_edges = instance_of_edges + supplemental_edges + reference_edges
 
     logger.info(
-        "Enrichment complete: %d TypeDefinition + %d supplemental nodes, %d edges",
-        len(type_def_nodes), len(supplemental_nodes), len(all_edges),
+        "Enrichment complete: %d TypeDefinition + %d supplemental + %d reference nodes, %d edges",
+        len(type_def_nodes), len(supplemental_nodes), len(reference_nodes), len(all_edges),
     )
 
     return resources, all_ref_nodes, all_edges
