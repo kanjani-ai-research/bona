@@ -15,7 +15,7 @@
 - [ ] `bona-provider-control-tower` — landing zones, enabled controls, baselines
 - [ ] `bona-provider-organizations` — OUs, accounts, SCPs
 - [ ] `bona-provider-azure` — Azure Resource Graph provider
-- [ ] `bona-provider-gcp` — GCP Asset Inventory provider
+- [ ] `bona-provider-gcp` — GCP Asset Inventory provider ✅ (implemented + live-tested)
 - [ ] `bona-provider-k8s` — Kubernetes API provider
 
 ## Enhancements
