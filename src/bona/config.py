@@ -156,6 +156,26 @@ class LLMTaskConfig:
 
 
 @dataclass
+class MCPConfig:
+    """MCP Server configuration."""
+
+    enabled: bool = False
+    server_url: str = ""  # HTTP transport
+    command: str = ""  # stdio transport (e.g. "npx @aws/mcp-server")
+
+
+@dataclass
+class PromptsConfig:
+    """Configure prompt sources per task (local or Bedrock managed)."""
+
+    compliance_mapping: dict = field(default_factory=lambda: {"source": "local", "local_name": "compliance-mapping"})
+    remediation: dict = field(default_factory=lambda: {"source": "local", "local_name": "remediation-guidance"})
+    audit_summary: dict = field(default_factory=lambda: {"source": "local", "local_name": "audit-summary"})
+    classify: dict = field(default_factory=lambda: {"source": "local", "local_name": "classify-relationships"})
+    system: dict = field(default_factory=lambda: {"source": "local", "local_name": "bona-system"})
+
+
+@dataclass
 class LLMConfig:
     """Controls LLM enrichment behavior."""
 
@@ -181,6 +201,8 @@ class BonaConfig:
     graph_schema: GraphSchemaConfig = field(default_factory=GraphSchemaConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     learning: LearningConfig = field(default_factory=LearningConfig)
+    mcp: MCPConfig = field(default_factory=MCPConfig)
+    prompts: PromptsConfig = field(default_factory=PromptsConfig)
 
     @classmethod
     def from_dict(cls, data: dict) -> "BonaConfig":
