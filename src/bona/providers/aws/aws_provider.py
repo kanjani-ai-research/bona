@@ -17,8 +17,8 @@ from typing import Optional
 import boto3
 from botocore.exceptions import ClientError
 
-from ..provider_base import AssetProvider
-from ...schema.model import AssetNode, AssetEdge, DiscoveryResult
+from ..providers.provider_base import AssetProvider
+from ..schema.model import AssetNode, AssetEdge, DiscoveryResult
 
 logger = logging.getLogger(__name__)
 

@@ -21,7 +21,6 @@ classifiers = [
 dependencies = [
     "boto3>=1.35.0",
     "pydantic>=2.0",
-    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
