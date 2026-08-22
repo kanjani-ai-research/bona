@@ -21,6 +21,7 @@ from .providers.provider_base import AssetProvider
 from .providers.aws.aws_provider import AWSProvider
 from .pipeline.discovery_pipeline import DiscoveryPipeline
 from .schema.model import AssetNode, AssetEdge, DiscoveryResult
+from .schema.metis_schema import generate_schema_package
 
 __all__ = [
     "AssetProvider",
@@ -29,4 +30,5 @@ __all__ = [
     "AssetNode",
     "AssetEdge",
     "DiscoveryResult",
+    "generate_schema_package",
 ]

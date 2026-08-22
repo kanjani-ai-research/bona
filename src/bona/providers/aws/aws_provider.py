@@ -38,6 +38,24 @@ class AWSProvider(AssetProvider):
         self._session = session or boto3.Session(region_name=region)
         self._config = self._session.client("config", region_name=region)
 
+    # Mapping of ID prefix patterns to AWS resource types
+    _ID_PREFIX_TO_RESOURCE_TYPE = {
+        "vpc-": "AWS::EC2::VPC",
+        "subnet-": "AWS::EC2::Subnet",
+        "sg-": "AWS::EC2::SecurityGroup",
+        "igw-": "AWS::EC2::InternetGateway",
+        "rtb-": "AWS::EC2::RouteTable",
+        "acl-": "AWS::EC2::NetworkAcl",
+        "eni-": "AWS::EC2::NetworkInterface",
+        "vol-": "AWS::EC2::Volume",
+        "i-": "AWS::EC2::Instance",
+        "nat-": "AWS::EC2::NatGateway",
+        "eipalloc-": "AWS::EC2::EIP",
+        "snap-": "AWS::EC2::Snapshot",
+        "ami-": "AWS::EC2::Image",
+        "lt-": "AWS::EC2::LaunchTemplate",
+    }
+
     def discover(self) -> DiscoveryResult:
         """Full discovery: resources + relationships + compliance."""
         t0 = time.time()
@@ -45,6 +63,9 @@ class AWSProvider(AssetProvider):
         resources = self._discover_resources()
         relationships = self._discover_relationships(resources)
         findings = self._discover_compliance()
+
+        # Ensure all edge targets exist as nodes
+        self._ensure_edge_targets(resources, relationships)
 
         duration = int((time.time() - t0) * 1000)
 
@@ -113,6 +134,64 @@ class AWSProvider(AssetProvider):
     # ------------------------------------------------------------------
     # Internal methods
     # ------------------------------------------------------------------
+
+    def _ensure_edge_targets(self, resources: list[AssetNode], relationships: list[AssetEdge]) -> None:
+        """Ensure all edge targets exist as nodes, creating stubs for missing ones.
+
+        Collects all target_ids from discovered edges, finds which ones are
+        not in the resources list, and creates minimal AssetNode stubs for them.
+        """
+        existing_ids = {r.id for r in resources}
+
+        # Collect all target_ids from edges
+        target_ids = {edge.target_id for edge in relationships if edge.target_id}
+
+        # Find missing targets
+        missing_ids = target_ids - existing_ids
+
+        if not missing_ids:
+            return
+
+        # Build a lookup from target_id → edge properties (for resource_type inference)
+        target_edge_props: dict[str, dict] = {}
+        for edge in relationships:
+            if edge.target_id in missing_ids and edge.target_id not in target_edge_props:
+                target_edge_props[edge.target_id] = edge.properties
+
+        # Create stub nodes for missing targets
+        for target_id in missing_ids:
+            props = target_edge_props.get(target_id, {})
+            resource_type = props.get("resource_type", "")
+
+            # If no resource_type from edge properties, infer from ID pattern
+            if not resource_type:
+                resource_type = self._infer_resource_type(target_id)
+
+            stub = AssetNode(
+                id=target_id,
+                node_type="CSPResource",
+                provider="aws",
+                name=props.get("resource_name", target_id),
+                region=self.region,
+                account_id=self.account_id,
+                resource_type=resource_type,
+                state="STUB",
+                properties={
+                    "resource_type": resource_type,
+                    "resource_id": target_id,
+                    "stub": True,
+                },
+            )
+            resources.append(stub)
+
+        logger.debug("Created %d stub nodes for missing edge targets", len(missing_ids))
+
+    def _infer_resource_type(self, resource_id: str) -> str:
+        """Infer AWS resource type from an ID prefix pattern."""
+        for prefix, rtype in self._ID_PREFIX_TO_RESOURCE_TYPE.items():
+            if resource_id.startswith(prefix):
+                return rtype
+        return "AWS::Unknown::Resource"
 
     def _discover_resources(self, resource_types: list[str] | None = None) -> list[AssetNode]:
         """List all discovered resources from AWS Config."""
