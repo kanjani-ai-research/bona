@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bona"
-version = "0.1.1"
+version = "0.2.0"
 description = "Infrastructure asset graph — the Joern for cloud. Discovers, maps, and graphs CSP resources."
 readme = "README.md"
 license = "MIT"
