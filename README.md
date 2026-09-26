@@ -1,14 +1,8 @@
 # Bona
 
-[![PyPI version](https://img.shields.io/pypi/v/bona.svg)](https://pypi.org/project/bona/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+**The Joern for cloud** — builds an Asset Property Graph from AWS Config and exports Joern-compatible `nodes.json` + `edges.json`.
 
-**Infrastructure asset graph — the Joern for cloud.**
-
-Discovers, maps, and graphs CSP resources via AWS Config.
-Produces nodes + edges that feed into Neptune for compliance analysis, impact assessment, and risk scoring.
-
-> **Standalone package. No dependency on graphrag-toolkit.**
+Bona discovers your cloud infrastructure via AWS Config's advanced SQL queries and produces a typed property graph that can be loaded into [Amazon Neptune](https://aws.amazon.com/neptune/), the [GraphRAG Toolkit](https://github.com/awslabs/graphrag-toolkit), [Neo4j](https://neo4j.com), or any tool that consumes flat JSON node/edge format. The output schema is inspired by [Joern](https://joern.io)'s `cpg_exporter.py` — same flat structure, applied to cloud assets instead of code.
 
 ## Installation
 
@@ -16,82 +10,587 @@ Produces nodes + edges that feed into Neptune for compliance analysis, impact as
 pip install bona
 ```
 
-## Dependencies
-
-Bona has minimal dependencies:
-- `boto3>=1.35.0` — AWS SDK for resource discovery
-- `pydantic>=2.0` — Data validation and schema models
-
-Bona is a standalone package. It does not depend on `graphrag-document-graph`, `graphrag-codeproperty-graph`, or `graphrag-toolkit-lexical-graph`.
+Requires Python 3.11+ and valid AWS credentials with `config:SelectResourceConfig` permissions.
 
 ## Quick Start
 
+### Export — full infrastructure graph
+
 ```bash
-# Discover all resources in an account
-bona discover --account 123456789012 --region us-east-1
+# Export all resources in a region
+bona export --profile myprofile --region us-east-1
 
-# Enumerate AWS services (for recipe generation)
-bona services
+# Filter to specific resource types (supports globs)
+bona export --profile myprofile --region us-east-1 --types "AWS::EC2::*,AWS::S3::*"
 
-# Check compliance state
-bona compliance --account 123456789012
+# Multi-region export
+bona export --profile myprofile --region us-east-1,us-west-2,eu-west-1
+
+# Multi-account via aggregator
+bona export --profile myprofile --region us-east-1 --aggregator MyOrgAggregator
+
+# Include compliance findings as graph nodes
+bona export --profile myprofile --region us-east-1 --include-compliance
+
+# Upload to S3
+bona export --profile myprofile --region us-east-1 --s3-uri s3://my-bucket/apg/
+
+# Export for Neptune bulk loader
+bona export --profile myprofile --region us-east-1 --format neptunecsv
 ```
 
-## Python API
+### History — temporal graph (config changes over time)
+
+```bash
+# Get configuration history for a specific resource
+bona history --profile myprofile --region us-east-1 \
+  --resource-type AWS::EC2::Instance \
+  --resource-id i-0abc123def456
+
+# Limit to last 5 snapshots
+bona history --profile myprofile --region us-east-1 \
+  --resource-type AWS::S3::Bucket \
+  --resource-id my-bucket-name \
+  --limit 5
+```
+
+### Types — list tracked resource types
+
+```bash
+# Show all resource types tracked by AWS Config in a region
+bona types --profile myprofile --region us-east-1
+```
+
+### Schema — download type definitions
+
+```bash
+# Download CloudFormation type schemas to local cache
+bona schema --profile myprofile --region us-east-1
+
+# Specific types
+bona schema --profile myprofile --region us-east-1 --types "AWS::S3::Bucket,AWS::EC2::Instance"
+
+# All types tracked by Config
+bona schema --profile myprofile --region us-east-1 --types all
+
+# Upload schema cache to S3
+bona schema --profile myprofile --region us-east-1 --s3-uri s3://my-bucket/schemas/
+```
+
+### Enrichment — type-aware graph
+
+```bash
+# Export with type schema enrichment (soft = uses cache, no extra AWS calls)
+bona export --profile myprofile --region us-east-1 --enrich
+
+# Hard enrichment (re-downloads schemas from CloudFormation)
+bona export --profile myprofile --region us-east-1 --enrich hard
+```
+
+Enrichment adds **TypeDefinition reference nodes** and **INSTANCE_OF edges** to the graph:
+
+```
+[IAM Role "MyRole"] ──INSTANCE_OF──▶ [TypeDefinition "AWS::IAM::Role"]
+[IAM Role "OtherRole"] ──INSTANCE_OF──▶ [TypeDefinition "AWS::IAM::Role"]
+[S3 Bucket "data"] ──INSTANCE_OF──▶ [TypeDefinition "AWS::S3::Bucket"]
+```
+
+One TypeDefinition node per resource type carries the full schema contract (properties, required fields, read-only, identifiers).
+
+### Bedrock Discovery
+
+Bona discovers your **Amazon Bedrock** environment — foundation models, agents, knowledge bases, prompts, guardrails, and AgentCore components:
+
+```bash
+bona export --profile myprofile --region us-east-1 --types "AWS::Bedrock::*"
+```
+
+**What it discovers:** 119+ foundation models, providers (Anthropic, Meta, Amazon, etc.), modalities (TEXT, IMAGE, EMBEDDING), model families, Bedrock Agents, Prompt Flows, and AgentCore resources.
+
+**Graph structure** — model decomposition:
+
+```
+[Model "claude-3-sonnet"] ──PROVIDED_BY──▶ [Provider "Anthropic"]
+[Model "claude-3-sonnet"] ──HAS_MODALITY──▶ [Modality "TEXT"]
+[Agent "support-bot"] ──USES_MODEL──▶ [Model "claude-3-sonnet"]
+[Agent "support-bot"] ──HAS_KB──▶ [KnowledgeBase "product-docs"]
+```
+
+See [docs/bedrock-discovery.md](https://github.com/evanerwee/bona/blob/main/docs/bedrock-discovery.md) for full details.
+
+### Configuration File
+
+Control enrichment, output, and logging via `bona.yaml`:
+
+```yaml
+logging:
+  level: INFO                    # DEBUG | INFO | WARNING | ERROR
+  path: ./bona.log               # local file or s3://bucket/logs/
+
+enrichment:
+  enabled: true
+  mode: soft                     # soft | hard
+  include:
+    - "AWS::EC2::*"
+    - "AWS::S3::*"
+  exclude:
+    - "AWS::CloudFormation::Stack"
+
+output:
+  dir: ./bona-output
+  s3_uri: s3://my-bucket/apg/
+
+schema_cache:
+  s3_uri: s3://my-bucket/schemas/
+
+learning:
+  s3_uri: s3://my-bucket/bona-learning/  # uploads graph-schema, rules, descriptions
+```
+
+Place as `./bona.yaml` (project-local), `~/.bona/config.yaml` (user-level), or pass `--config path/to/bona.yaml`.
+
+### Learn Mode — evolving graph schema
+
+Learn mode maintains a **versioned schema** of every node type and edge type Bona has ever observed. Each export run updates the schema with new types, properties, and relationship pairs — so over time you get a complete picture of your graph's shape without manual maintenance.
+
+```bash
+# Learn from an export (writes/updates ~/.bona/graph-schema.json)
+bona export --profile myprofile --region us-east-1 --learn
+
+# Combine with enrichment
+bona export --profile myprofile --region us-east-1 --enrich --learn
+```
+
+The schema lives at **`~/.bona/graph-schema.json`** (configurable via `schema.path` in `bona.yaml`).
+
+**Semver auto-bumping:**
+- **MINOR** bump — new node types, edge types, or relationship pairs discovered
+- **PATCH** bump — only observation counts/timestamps updated
+
+**Example** — what the schema captures:
+
+```json
+{
+  "version": "0.3.0",
+  "last_updated": "2026-08-06T12:00:00Z",
+  "node_types": {
+    "AWS::EC2::Instance": {
+      "observed_properties": ["imageId", "instanceType", "subnetId", "vpcId"],
+      "observed_count": 42,
+      "first_seen": "2026-08-01T10:00:00Z",
+      "last_seen": "2026-08-06T12:00:00Z"
+    }
+  },
+  "edge_types": {
+    "IS_CONTAINED_IN": {
+      "observed_pairs": [
+        {"source_type": "AWS::EC2::Subnet", "target_type": "AWS::EC2::VPC"}
+      ],
+      "observed_count": 15
+    }
+  }
+}
+```
+
+See [docs/graph-schema.md](https://github.com/evanerwee/bona/blob/main/docs/graph-schema.md) for full details.
+
+### LLM Enrichment
+
+LLM enrichment uses **Amazon Bedrock** to analyze resource properties and improve graph quality:
+
+- **Relationship classification** — identifies properties that reference other resources and converts them into typed edges
+- **Description generation** — produces human-readable summaries of resources for graph exploration and RAG
+
+```bash
+# Export with LLM enrichment
+bona export --profile myprofile --region us-east-1 --llm-enrich
+
+# Combine with schema enrichment and learn mode
+bona export --profile myprofile --region us-east-1 --enrich --llm-enrich --learn
+```
+
+**Configuration** in `bona.yaml`:
+
+```yaml
+llm_enrichment:
+  model_id: anthropic.claude-3-haiku-20240307-v1:0
+  tasks:
+    - classify_relationships
+    - generate_descriptions
+  budget:
+    max_invocations: 500        # cap per export run
+    max_input_tokens: 100000    # total input token budget
+```
+
+**Example** — what LLM enrichment discovers:
+
+```
+# A securityGroupIds property gets classified as a relationship:
+[Lambda "api-handler"] ──IS_ASSOCIATED_WITH──▶ [SG "sg-abc123"]
+
+# A resource gets a generated description:
+{ "description": "Production API handler Lambda in VPC, triggered by API Gateway, with DynamoDB access" }
+```
+
+See [docs/llm-enrichment.md](https://github.com/evanerwee/bona/blob/main/docs/llm-enrichment.md) for full details.
+
+### Plugins
+
+Bona uses a **pluggy-based plugin system** that lets you add new providers, supplemental enrichers, and relationship classifiers without modifying core bona code.
+
+**Install a plugin:**
+
+```bash
+pip install bona-provider-xxx
+```
+
+Plugins are auto-discovered via Python entry points — no config changes needed.
+
+**Create a plugin:**
 
 ```python
-from bona import AWSProvider, DiscoveryPipeline
+# my_provider/plugin.py
+import bona.hookspecs
+from pluggy import HookimplMarker
 
-provider = AWSProvider(account_id="123456789012", region="us-east-1")
-result = provider.discover()
+hookimpl = HookimplMarker("bona")
 
-print(result.summary())
-# → Discovered 142 resources, 287 relationships, 3 findings in 4521ms
-
-for resource in result.resources:
-    print(f"{resource.resource_type}: {resource.name}")
-
-for edge in result.relationships:
-    print(f"{edge.source_id} --{edge.edge_type}--> {edge.target_id}")
+@hookimpl
+def bona_reference_providers():
+    """Return a list of ReferenceProvider instances."""
+    return [MyCustomProvider()]
 ```
+
+Register via `pyproject.toml`:
+
+```toml
+[project.entry-points."bona"]
+my_provider = "my_provider.plugin"
+```
+
+**Available hooks:**
+
+| Hook | Purpose |
+|------|---------|
+| `bona_reference_providers` | Add reference data providers (type definitions, external metadata) |
+| `bona_supplemental_providers` | Add supplemental enrichment providers (hardware specs, pricing, etc.) |
+| `bona_relationship_classifiers` | Add custom relationship classification logic |
+
+See [examples/bona-provider-example/](https://github.com/evanerwee/bona/tree/main/examples/bona-provider-example) for a full working plugin example.
+
+## CLI Reference
+
+```
+bona [--verbose] [--config <path>] <command> [options]
+
+Global:
+  --verbose, -v         Enable debug logging (overrides config level to DEBUG)
+  --config <path>       Path to bona config file (JSON or YAML)
+
+Commands:
+  export                Export Asset Property Graph (nodes.json + edges.json)
+  schema                Download CloudFormation type schemas to local cache
+  history               Export temporal graph — resource config over time
+  types                 List resource types tracked by AWS Config
+  cache                 Pre-populate local cache (instance types, etc.)
+```
+
+### `bona export`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--profile` | (default) | AWS profile name from ~/.aws/credentials |
+| `--region` | us-east-1 | AWS region (comma-separated for multi-region) |
+| `--output-dir` | ./bona-output | Local output directory |
+| `--s3-uri` | | S3 URI for upload (e.g. `s3://bucket/prefix/`) |
+| `--types` | (all) | Resource type filter (comma-separated, globs supported) |
+| `--max-resources` | 10000 | Safety cap on total resources |
+| `--include-compliance` | false | Include Config rule compliance findings as nodes |
+| `--aggregator` | | Config aggregator name for multi-account queries |
+| `--enrich` | disabled | Enable type schema enrichment (`soft` or `hard`). If flag given without value: `soft` |
+| `--learn` | false | Update graph schema with discovered node/edge types (writes `~/.bona/graph-schema.json`) |
+| `--llm-enrich` | false | Enable LLM enrichment via Bedrock (classify relationships, generate descriptions) |
+| `--format` | json | Output format: `json`, `neptunecsv`, `neo4jcsv`, `graphml`, `dot` |
+| `--refresh-cache` | false | Force refresh of all cached data from AWS |
+
+### `bona schema`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--profile` | (default) | AWS profile name |
+| `--region` | us-east-1 | AWS region |
+| `--type` | | Single resource type (e.g. `AWS::S3::Bucket`) |
+| `--types` | (common) | Comma-separated types, or `all` for Config-tracked types |
+| `--s3-uri` | | Upload schemas to S3 (e.g. `s3://bucket/schemas/`) |
+| `--validate` | | Validate a `nodes.json` file against cached schemas |
+
+### `bona history`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--profile` | (default) | AWS profile name |
+| `--region` | us-east-1 | AWS region |
+| `--resource-type` | (required) | Resource type (e.g. `AWS::EC2::Instance`) |
+| `--resource-id` | (required) | Resource ID |
+| `--limit` | 20 | Max history items |
+| `--output-dir` | ./bona-output | Local output directory |
+
+### `bona types`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--profile` | (default) | AWS profile name |
+| `--region` | us-east-1 | AWS region |
+
+## Output Format
+
+Bona produces two files: `nodes.json` and `edges.json` (plus a `manifest.json` summary).
+
+### nodes.json
+
+Each node is a flat JSON object representing an AWS resource:
+
+```json
+[
+  {
+    "id": "arn:aws:ec2:us-east-1:123456789012:instance/i-0abc123def456",
+    "node_type": "AWS::EC2::Instance",
+    "name": "web-server-1",
+    "stable_id": "aws|123456789012|us-east-1|AWS::EC2::Instance|i-0abc123def456",
+    "semantic_hash": "a1b2c3d4e5f6g7h8",
+    "provider": "aws",
+    "account_id": "123456789012",
+    "region": "us-east-1",
+    "resource_type": "AWS::EC2::Instance",
+    "state": "ACTIVE",
+    "tags": {"Name": "web-server-1", "Environment": "production"},
+    "configuration_capture_time": "2026-08-05T12:00:00Z",
+    "instanceType": "t3.medium",
+    "vpcId": "vpc-abc123",
+    "subnetId": "subnet-def456",
+    "imageId": "ami-0123456789abcdef0"
+  }
+]
+```
+
+Key fields:
+- **id** — ARN (globally unique identifier)
+- **node_type** — AWS resource type (e.g. `AWS::EC2::Instance`)
+- **stable_id** — deterministic identity for delta reconciliation across runs
+- **semantic_hash** — SHA-256 of configuration; detects config drift
+- **state** — `ACTIVE`, `DELETED`, or `DISCOVERED`
+- All configuration properties are flattened to top-level keys (Joern style)
+
+### edges.json
+
+Each edge represents a relationship between resources:
+
+```json
+[
+  {
+    "source_id": "arn:aws:ec2:us-east-1:123456789012:instance/i-0abc123",
+    "target_id": "arn:aws:ec2:us-east-1:123456789012:security-group/sg-xyz789",
+    "edge_type": "IS_ASSOCIATED_WITH",
+    "stable_id": "aws|123456789012|EDGE|IS_ASSOCIATED_WITH|i-0abc123→sg-xyz789"
+  }
+]
+```
+
+Edge types include:
+- `IS_CONTAINED_IN`, `CONTAINS` — hierarchy (subnet in VPC)
+- `IS_ATTACHED_TO` — resource attachments (volume to instance)
+- `IS_ASSOCIATED_WITH` — associations (security group to instance)
+- `IN_VPC`, `IN_SUBNET` — inferred from configuration properties
+- `USES_ROLE`, `ENCRYPTED_BY` — inferred from IAM/KMS references
+- `ROUTES_TO`, `ATTACHED_TO`, `IN_CLUSTER` — inferred from ARN references
+- `INSTANCE_OF` — resource instance to its TypeDefinition (enrichment)
+- `RUNS_ON` — EC2 instance to its InstanceSpec (supplemental enrichment)
+- `CHANGED_TO` — temporal edges (history command)
 
 ## Architecture
 
+```mermaid
+graph TD
+    CLI[bona CLI] --> Config[Config<br/>bona.yaml]
+    CLI --> Provider[AWSProvider]
+    
+    Provider --> Enumerate[1. Enumerate types]
+    Provider --> Query[2. SQL query + backfill]
+    Provider --> Extract[3. Extract relationships]
+    Provider --> Enrich[4. Enrich via plugins]
+    Provider --> Learn[5. Learn mode]
+    Provider --> LLM[6. LLM enrichment]
+    
+    Enrich --> Plugins[Plugin Manager<br/>pluggy]
+    Plugins --> TypeSchemas[Type Schemas<br/>CloudFormation]
+    Plugins --> RefProviders[Reference Providers<br/>Bedrock, EC2 specs]
+    Plugins --> External[External Plugins<br/>pip install]
+    
+    Provider --> Exporter[Exporter]
+    Exporter --> NodesJSON[nodes.json]
+    Exporter --> EdgesJSON[edges.json]
+    Exporter --> S3[S3 Upload]
+    
+    Learn --> GraphSchema[graph-schema.json<br/>semver]
+    Learn --> Rules[relationship-rules.json]
+    LLM --> Descriptions[descriptions.json]
+    
+    subgraph AWS APIs
+        ConfigAPI[AWS Config<br/>select_resource_config<br/>batch_get_resource_config]
+        CFN[CloudFormation<br/>describe_type]
+        Bedrock[Bedrock<br/>list_foundation_models<br/>bedrock-agent<br/>bedrock-agentcore]
+        BedrockRT[Bedrock Runtime<br/>Converse API]
+    end
+    
+    Query --> ConfigAPI
+    TypeSchemas --> CFN
+    RefProviders --> Bedrock
+    LLM --> BedrockRT
+    
+    subgraph Consumers
+        Neptune[Amazon Neptune]
+        GraphRAG[GraphRAG Toolkit]
+        Neo4j[Neo4j]
+        Analytics[jq / pandas]
+    end
+    
+    Exporter --> Consumers
 ```
-AWS Config (already running) → Bona reads → normalizes → outputs graph schema
-                                                              ↓
-                                                    Neptune (via AI-LENS)
+
+## Multi-Account via Aggregator
+
+Use the `--aggregator` flag to query across multiple AWS accounts and regions using an [AWS Config Aggregator](https://docs.aws.amazon.com/config/latest/developerguide/aggregate-data.html):
+
+```bash
+bona export --profile management --region us-east-1 --aggregator MyOrgAggregator
 ```
 
-Bona is thin. AWS Config does the heavy lifting. Bona just transforms the output
-into a graph schema compatible with the GraphRAG Toolkit ecosystem.
+This uses `select_aggregate_resource_config` instead of `select_resource_config`, returning resources from all accounts enrolled in the aggregator. Each node retains its original `account_id` and `region`.
 
-## Package Structure
+See [docs/multi-account.md](https://github.com/evanerwee/bona/blob/main/docs/multi-account.md) for aggregator setup instructions.
 
+## Compatibility
+
+| Consumer | How to use |
+|----------|-----------|
+| **Amazon Neptune** | `bona export --format neptunecsv` → upload CSVs to S3 → Neptune bulk loader |
+| **GraphRAG Toolkit** | Feed `nodes.json` as document-graph source for graph-augmented RAG |
+| **Neo4j** | `bona export --format neo4jcsv` or import JSON via `apoc.load.json` |
+| **document-graph** | Native format — flat JSON nodes with typed edges |
+| **jq / pandas** | Standard JSON — pipe through `jq` or load with `pd.read_json()` |
+
+## MCP Integration
+
+Bona integrates with [MCP (Model Context Protocol)](https://github.com/awslabs/mcp) servers for two purposes:
+
+### 1. LLM Tool Use During Enrichment
+
+When MCP is enabled, Claude can call AWS APIs during reasoning to make better classification decisions:
+
+```yaml
+mcp:
+  enabled: true
+  servers:
+    - name: aws
+      server_url: "http://localhost:3000"
+    - name: cmdb
+      command: "npx @company/cmdb-mcp-server"
+      tool_filter: [lookup_asset, get_owner]
 ```
-bona/
-  ├── providers/        AWS, Azure, GCP, Application adapters
-  │   └── aws/          AWS Config + Resource Explorer + Inspector
-  ├── pipeline/         discover → transform → load → enrich
-  ├── schema/           AssetNode, AssetEdge, DiscoveryResult
-  ├── query/            graph traversal, compliance, impact analysis
-  └── cli.py            standalone CLI tool
+
+### 2. Zero-Code Discovery (MCPProvider)
+
+Discover resources from **any** AWS service without writing a plugin:
+
+```yaml
+mcp:
+  enabled: true
+  servers:
+    - name: aws
+      server_url: "http://localhost:3000"
+  discovery:
+    - service: guardduty
+      operation: ListDetectors
+      node_type: "AWS::GuardDuty::Detector"
+      id_field: "DetectorIds[]"
+      detail_operation: GetDetector
+      detail_params: {DetectorId: "$id"}
+    - service: securityhub
+      operation: GetFindings
+      node_type: "AWS::SecurityHub::Finding"
+      items_key: Findings
+      id_field: Id
+      name_field: Title
 ```
 
-## Dependency Chain
+See [docs/llm-enrichment.md](https://github.com/evanerwee/bona/blob/main/docs/llm-enrichment.md) for full MCP documentation.
 
+## GCP Provider
+
+Bona discovers **Google Cloud** resources via Cloud Asset Inventory:
+
+```bash
+# Configure in bona.yaml
+gcp:
+  project_id: "my-project-id"
+  credentials: "~/.bona/gcp-key.json"
 ```
-bona (standalone)
-├── boto3>=1.35.0
-└── pydantic>=2.0
+
+```python
+from bona.providers.gcp import GCPProvider
+
+provider = GCPProvider(project_id="my-project", credentials="~/.bona/gcp-key.json")
+result = provider.discover_with_enrichment()
+# Returns: resources + IAM edges + Recommender insights + hierarchy nodes
 ```
 
-Bona is independent. It produces graph-compatible output but does not import or require any graphrag packages.
+**What it discovers:**
+- All resources via Cloud Asset Inventory (Storage, Compute, Functions, PubSub, etc.)
+- IAM policy bindings as `HAS_ROLE` edges (who can access what)
+- Recommender insights (over-permissioned accounts, idle resources)
+- Security Command Center findings (requires GCP Organization)
 
-## Contributing
+**Graph structure:**
+```
+Cloud::Root → Cloud::Provider (GCP) → Cloud::Project → Cloud::Region
+  ├── GCP::Storage::Bucket ──BELONGS_TO──▶ Region
+  ├── serviceAccount:sa@proj ──HAS_ROLE(viewer)──▶ Project
+  └── GCP::Recommender::Insight ◀──HAS_INSIGHT── over-permissioned account
+```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and PR guidelines.
+## Drift Detection
+
+Compare two exports to detect infrastructure changes:
+
+```bash
+# Text summary
+bona diff ./export-monday ./export-friday
+
+# JSON output (for CI/CD pipelines)
+bona diff ./baseline ./current --format json
+
+# Show only modified resources with property-level changes
+bona diff ./old ./new --only modified
+```
+
+Drift detection uses `stable_id` for identity matching and `semantic_hash` for change detection — so renamed resources are tracked correctly across exports.
+
+## Requirements
+
+- Python 3.11+
+- AWS credentials with permissions:
+  - `config:SelectResourceConfig`
+  - `config:SelectAggregateResourceConfig` (if using `--aggregator`)
+  - `config:GetResourceConfigHistory` (for `history` command)
+  - `config:DescribeComplianceByResource` (if using `--include-compliance`)
+  - `config:DescribeConfigRules` (if using `--include-compliance`)
+  - `cloudformation:DescribeType` (if using `--enrich` or `bona schema`)
+  - `ec2:DescribeInstanceTypes` (if using EC2 supplemental enrichment)
+  - `bedrock-runtime:Converse` (if using `--llm-enrich`)
+  - `sts:GetCallerIdentity`
+  - `s3:PutObject` (if using `--s3-uri`)
+- AWS Config recorder must be enabled in target region(s)
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT

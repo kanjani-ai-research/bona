@@ -1,67 +1,73 @@
-"""Asset Provider Base — abstract interface for all CSP/Application providers."""
+"""Asset Provider Base — abstract interface for all providers.
+
+This is bona's equivalent of Joern's X2CPG: the base framework that all
+frontends (providers) must implement to produce an Asset Property Graph.
+
+Contract:
+  - All providers produce AssetNode + AssetEdge objects
+  - All nodes have: id, node_type, name, stable_id, semantic_hash
+  - All edges have: source_id, target_id, edge_type, stable_id
+  - The discover() method is the main entry point
+
+Writing a new provider:
+  1. Subclass AssetProvider
+  2. Implement discover() → DiscoveryResult
+  3. Register via pluggy (bona_reference_providers hook) or as a package
+
+Example:
+    class GCPProvider(AssetProvider):
+        name = "gcp"
+        
+        def discover(self) -> DiscoveryResult:
+            nodes, edges = self._query_asset_inventory()
+            return DiscoveryResult(resources=nodes, relationships=edges)
+"""
 
 from abc import ABC, abstractmethod
-from ..schema.model import DiscoveryResult
+from typing import Optional
+
+from ..schema.model import AssetNode, AssetEdge, DiscoveryResult
 
 
 class AssetProvider(ABC):
-    """Abstract base class for asset discovery providers.
+    """Abstract base for all asset discovery providers.
 
-    Each CSP (AWS, Azure, GCP) and application type (K8s, SaaS)
-    implements this interface. The pipeline calls these methods
-    in sequence to build the asset graph.
-
-    Usage:
-        provider = AWSProvider(account_id="123456789012", region="us-east-1")
-        result = provider.discover()
+    Subclass this to add support for a new cloud platform,
+    SaaS service, or application type.
     """
 
-    def __init__(self, account_id: str = "", region: str = ""):
-        self.account_id = account_id
+    # Provider identity
+    name: str = ""          # e.g. "aws", "azure", "gcp", "k8s"
+    description: str = ""   # Human-readable description
+
+    def __init__(self, region: str = "", account_id: str = "", **kwargs):
         self.region = region
+        self.account_id = account_id
 
     @abstractmethod
     def discover(self) -> DiscoveryResult:
-        """Discover all resources, configurations, and relationships.
+        """Discover all resources and relationships.
 
-        Returns a DiscoveryResult with:
-          - resources: list of AssetNode (the things)
-          - relationships: list of AssetEdge (how they connect)
-          - findings: list of AssetNode (compliance/security issues)
+        This is the main entry point. Returns:
+          - resources: list[AssetNode] — discovered assets
+          - relationships: list[AssetEdge] — connections between assets
+          - findings: list[AssetNode] — compliance/security findings (optional)
+          - duration_ms: int — how long discovery took
         """
         ...
 
-    @abstractmethod
-    def discover_services(self) -> list[dict]:
-        """Enumerate available services and their operations.
+    def get_resource_types(self) -> list[str]:
+        """List available resource types this provider can discover.
 
-        Returns list of {service_name, operation_count, operations[]}.
-        Used by AI recipe generation.
+        Override to support type filtering (--types flag).
+        Default: returns empty list (discovers all).
         """
-        ...
+        return []
 
-    @abstractmethod
-    def discover_resources(self, resource_types: list[str] | None = None) -> DiscoveryResult:
-        """Discover resources, optionally filtered by type.
+    def validate(self) -> list[str]:
+        """Validate that this provider can run (credentials, permissions, etc).
 
-        Args:
-            resource_types: e.g., ["AWS::EC2::Instance", "AWS::S3::Bucket"]
-                           None = discover all.
+        Returns list of error messages. Empty list = all good.
+        Used by `bona doctor`.
         """
-        ...
-
-    @abstractmethod
-    def discover_relationships(self, resource_ids: list[str]) -> list:
-        """Discover relationships for specific resources.
-
-        Uses AWS Config relationship data.
-        """
-        ...
-
-    @abstractmethod
-    def discover_compliance(self) -> DiscoveryResult:
-        """Discover compliance state — which resources pass/fail rules.
-
-        Sources: AWS Config rules, Inspector findings, Security Hub.
-        """
-        ...
+        return []

@@ -1,0 +1,125 @@
+# Bona Frameworks Catalog
+# Version: 1.0.0
+# Schema: frameworks/v1
+#
+# This file defines available compliance frameworks, their templates,
+# and associated documentation sources for KB enrichment.
+# Add new frameworks by appending entries — no code changes needed.
+
+schema: frameworks/v1
+version: "1.0.0"
+last_updated: "2026-08-07"
+
+source:
+  repo: https://github.com/awslabs/aws-config-rules
+  path: aws-config-conformance-packs
+  branch: master
+
+frameworks:
+  NIST-800-53:
+    version: "rev5"
+    description: "NIST 800-53 rev 5 — Federal information systems security controls"
+    template: "Operational-Best-Practices-for-NIST-800-53-rev-5.yaml"
+    local_file: "NIST-800-53-rev5.yaml"
+    rules_count: 160
+    tags: [federal, security, compliance]
+    docs:
+      - url: "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-53r5.pdf"
+        name: "NIST SP 800-53 rev 5"
+        type: pdf
+
+  CIS-L1:
+    version: "v1.4"
+    description: "CIS AWS Foundations Benchmark v1.4 Level 1"
+    template: "Operational-Best-Practices-for-CIS-AWS-v1.4-Level1.yaml"
+    local_file: "CIS-AWS-v1.4-Level1.yaml"
+    rules_count: 35
+    tags: [cis, benchmark, level1]
+    docs:
+      - url: "https://www.cisecurity.org/benchmark/amazon_web_services"
+        name: "CIS AWS Benchmark (requires membership)"
+        type: reference
+
+  CIS-L2:
+    version: "v1.4"
+    description: "CIS AWS Foundations Benchmark v1.4 Level 2"
+    template: "Operational-Best-Practices-for-CIS-AWS-v1.4-Level2.yaml"
+    local_file: "CIS-AWS-v1.4-Level2.yaml"
+    rules_count: 50
+    tags: [cis, benchmark, level2]
+    docs:
+      - url: "https://www.cisecurity.org/benchmark/amazon_web_services"
+        name: "CIS AWS Benchmark (requires membership)"
+        type: reference
+
+  PCI-DSS:
+    version: "3.2.1"
+    description: "PCI DSS 3.2.1 — Payment Card Industry Data Security Standard"
+    template: "Operational-Best-Practices-for-PCI-DSS.yaml"
+    local_file: "PCI-DSS-3.2.1.yaml"
+    rules_count: 140
+    tags: [pci, payments, compliance]
+    docs:
+      - url: "https://docs-prv.pcisecuritystandards.org/PCI%20DSS/Standard/PCI-DSS-v3_2_1.pdf"
+        name: "PCI DSS v3.2.1 Standard"
+        type: pdf
+
+  HIPAA:
+    version: "2024"
+    description: "HIPAA Security Rule — Healthcare data protection"
+    template: "Operational-Best-Practices-for-HIPAA-Security.yaml"
+    local_file: "HIPAA-Security.yaml"
+    rules_count: 150
+    tags: [hipaa, healthcare, compliance]
+    docs:
+      - url: "https://www.hhs.gov/hipaa/for-professionals/security/laws-regulations/index.html"
+        name: "HIPAA Security Rule"
+        type: reference
+
+  Bedrock:
+    version: "2024"
+    description: "Amazon Bedrock Security & Governance Best Practices"
+    template: "Security-and-Governance-Best-Practices-for-Amazon-Bedrock.yaml"
+    local_file: "Bedrock-Security.yaml"
+    rules_count: 30
+    tags: [bedrock, ai, security]
+    docs:
+      - url: "https://docs.aws.amazon.com/pdfs/bedrock/latest/userguide/bedrock-ug.pdf"
+        name: "Amazon Bedrock User Guide"
+        type: pdf
+
+  NIST-CSF:
+    version: "1.1"
+    description: "NIST Cybersecurity Framework"
+    template: "Operational-Best-Practices-for-NIST-CSF.yaml"
+    local_file: ""
+    rules_count: 100
+    tags: [nist, csf, security]
+    docs:
+      - url: "https://nvlpubs.nist.gov/nistpubs/CSWP/NIST.CSWP.04162018.pdf"
+        name: "NIST CSF v1.1"
+        type: pdf
+
+  FedRAMP-High:
+    version: "2024"
+    description: "FedRAMP High Baseline"
+    template: "Operational-Best-Practices-for-FedRAMP-High.yaml"
+    local_file: ""
+    rules_count: 120
+    tags: [fedramp, federal, high]
+    docs:
+      - url: "https://www.fedramp.gov/assets/resources/documents/FedRAMP_Security_Controls_Baseline.xlsx"
+        name: "FedRAMP Security Controls"
+        type: reference
+
+  Well-Architected-Security:
+    version: "2024"
+    description: "AWS Well-Architected Framework — Security Pillar"
+    template: "Operational-Best-Practices-for-WA-Security-Pillar.yaml"
+    local_file: ""
+    rules_count: 40
+    tags: [well-architected, security, aws]
+    docs:
+      - url: "https://docs.aws.amazon.com/pdfs/wellarchitected/latest/security-pillar/wellarchitected-security-pillar.pdf"
+        name: "AWS Security Pillar Whitepaper"
+        type: pdf

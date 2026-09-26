@@ -1,0 +1,63 @@
+name: audit-summary
+version: "1.0"
+description: Generate executive compliance posture summary from graph data
+bedrock_prompt_id: "90PJM07D8C"
+
+system: |
+  You are a compliance auditor generating executive summaries. Be factual, concise,
+  and highlight risks. Use the graph data to provide a complete picture of the
+  organization's security posture.
+
+user_template: |
+  Compliance Posture Data:
+  
+  Conformance Packs:
+  {{#each conformance_packs}}
+  - {{name}}: score={{score}}%, rules={{rules_count}}
+  {{/each}}
+  
+  Findings Summary:
+  - Total resources evaluated: {{total_resources}}
+  - Compliant: {{compliant_count}}
+  - Non-compliant: {{non_compliant_count}}
+  - Compliance rate: {{compliance_rate}}%
+  
+  Top Failing Rules:
+  {{#each top_failing_rules}}
+  - {{rule_name}}: {{fail_count}} resources failing ({{nist_control}})
+  {{/each}}
+  
+  Resource Types with Most Findings:
+  {{#each failing_resource_types}}
+  - {{resource_type}}: {{count}} findings
+  {{/each}}
+  
+  Generate an executive compliance summary:
+  
+  ```json
+  {
+    "overall_posture": "Critical|At-Risk|Moderate|Good|Excellent",
+    "executive_summary": "2-3 sentence overview",
+    "key_risks": [
+      {"risk": "description", "impact": "what could happen", "priority": "P1|P2|P3"}
+    ],
+    "recommendations": [
+      {"action": "what to do", "effort": "Low|Medium|High", "impact": "High|Medium|Low"}
+    ],
+    "framework_coverage": {
+      "NIST-800-53": {"score": 85, "gaps": ["AC-2", "SC-8"]},
+      "CIS-L1": {"score": 92, "gaps": ["1.4", "2.1"]}
+    }
+  }
+  ```
+
+input_variables:
+  - conformance_packs
+  - total_resources
+  - compliant_count
+  - non_compliant_count
+  - compliance_rate
+  - top_failing_rules
+  - failing_resource_types
+
+tags: [audit, executive, summary]

@@ -1,0 +1,126 @@
+# Bona Configuration
+# Place as ./bona.yaml (project-local) or ~/.bona/config.yaml (user-level)
+# Or specify explicitly: bona --config path/to/bona.yaml export ...
+
+logging:
+  level: INFO                    # DEBUG | INFO | WARNING | ERROR
+  # path: ./bona.log            # local file log (optional)
+  # path: s3://my-bucket/logs/  # S3 log upload (flushed at end of run)
+
+enrichment:
+  enabled: true
+  mode: soft                     # soft (use cache) | hard (re-fetch from AWS)
+  include:                       # glob patterns — empty means all types
+    - "AWS::EC2::*"
+    - "AWS::S3::*"
+    - "AWS::Lambda::*"
+    - "AWS::IAM::*"
+    - "AWS::RDS::*"
+  exclude:                       # glob patterns — takes precedence over include
+    - "AWS::CloudFormation::Stack"
+  supplemental:
+    ec2_instance_specs: true      # fetch vCPU/memory/GPU specs for EC2 types
+
+output:
+  dir: ./bona-output
+  # s3_uri: s3://my-bucket/apg/  # auto-upload graph output to S3
+
+schema_cache:
+  # s3_uri: s3://my-bucket/schemas/  # auto-upload type schemas to S3
+
+graph_schema:
+  # s3_uri: s3://my-bucket/graph-schema.json  # upload learned schema to S3
+  # path: ./graph-schema.json                 # local path override (default: ~/.bona/graph-schema.json)
+
+# ─── LLM Configuration ───────────────────────────────────────────────────────
+# Controls AI-powered analysis of infrastructure resources.
+llm:
+  # enabled: true                                        # Toggle LLM features on/off (default: true)
+  # model_id: us.anthropic.claude-sonnet-4-5-20250929-v1:0  # Default Bedrock model for all LLM tasks
+  # region: us-east-1                                    # AWS region for Bedrock API calls
+  # temperature: 0.0                                     # Sampling temperature (0.0 = deterministic)
+  # budget_max_calls: 10                                 # Max LLM invocations per run (cost guardrail)
+  # system_prompt: "You are an AWS infrastructure analyst."  # Base system prompt for all tasks
+  # tasks:                                               # Per-task model overrides (optional)
+  #   classify: us.anthropic.claude-sonnet-4-5-20250929-v1:0   # Model for resource classification
+  #   validate: us.anthropic.claude-sonnet-4-5-20250929-v1:0   # Model for validation checks
+  #   describe: us.amazon.nova-lite-v1:0                       # Model for generating descriptions (cheaper/faster)
+
+# ─── MCP Configuration ───────────────────────────────────────────────────────
+# Model Context Protocol servers — gives the LLM access to tools during enrichment.
+# Supports multiple servers (AWS MCP, internal CMDB, custom APIs).
+mcp:
+  enabled: true
+  # Legacy single-server (backward compat):
+  # server_url: "http://localhost:3000"
+  # command: "npx @aws/mcp-server"
+
+  # Multi-server (recommended):
+  servers:
+    - name: aws                              # AWS MCP Server
+      server_url: "http://localhost:3000"
+      # command: "npx @aws/mcp-server"       # Alternative: stdio transport
+    - name: cmdb                             # Your internal CMDB
+      command: "npx @company/cmdb-mcp-server"
+      tool_filter:                           # Only expose these tools to the LLM
+        - lookup_asset
+        - get_owner
+    # - name: servicenow
+    #   server_url: "http://localhost:4000"
+    #   enabled: false                       # Disable without removing
+
+  # ─── MCP Discovery ──────────────────────────────────────────────────────────
+  # Discover resources from ANY AWS service without writing a plugin.
+  # Each entry calls an AWS API via MCP and maps results to graph nodes.
+  discovery:
+    - service: guardduty
+      operation: ListDetectors
+      node_type: "AWS::GuardDuty::Detector"
+      id_field: "DetectorIds[]"
+      detail_operation: GetDetector
+      detail_params:
+        DetectorId: "$id"
+
+    - service: inspector2
+      operation: ListFindings
+      node_type: "AWS::Inspector2::Finding"
+      items_key: findings
+      id_field: findingArn
+      name_field: title
+
+    - service: securityhub
+      operation: GetFindings
+      node_type: "AWS::SecurityHub::Finding"
+      items_key: Findings
+      id_field: Id
+      name_field: Title
+      params:
+        MaxResults: 100
+
+# ─── Prompts Configuration ───────────────────────────────────────────────────
+# Control prompt sources per task — use local YAML templates or Bedrock managed prompts.
+prompts:
+  classify:
+    source: local                            # "local" = frameworks/prompts/*.yaml
+    local_name: classify-relationships       # matches YAML filename or name field
+  system:
+    source: local
+    local_name: bona-system
+  # compliance_mapping:
+  #   source: local
+  #   local_name: compliance-mapping
+  # remediation:
+  #   source: local
+  #   local_name: remediation-guidance
+
+# ─── GCP Configuration ────────────────────────────────────────────────────────
+# GCP Cloud Asset Inventory provider — discovers all resources in a project/org.
+gcp:
+  project_id: "majestic-hybrid-292718"
+  credentials: "~/.bona/gcp-key.json"   # service account key (or set GOOGLE_APPLICATION_CREDENTIALS)
+  # organization_id: "123456789"        # scope to entire org
+  # folder_id: "folders/789"            # scope to folder
+  # asset_types:                        # filter (empty = all types)
+  #   - "compute.googleapis.com/*"
+  #   - "storage.googleapis.com/*"
+  # content_type: resource              # resource | iam_policy | org_policy

@@ -4,27 +4,37 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bona"
-version = "0.2.0"
-description = "Infrastructure asset graph — the Joern for cloud. Discovers, maps, and graphs CSP resources."
-readme = "README.md"
-license = "MIT"
+version = "0.8.0"
+description = "Infrastructure Asset Property Graph — the Joern for cloud."
 requires-python = ">=3.11"
-authors = [{name = "Evan Erwee", email = "evan@erwee.com"}]
-keywords = ["aws", "cloud", "assets", "graph", "compliance", "infrastructure", "config"]
+license = "MIT"
+readme = "README.md"
+authors = [
+    {name = "evanerwee"},
+]
+keywords = ["aws", "infrastructure", "property-graph", "joern", "asset-graph", "bedrock", "neptune"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Security",
     "Topic :: System :: Systems Administration",
 ]
-
 dependencies = [
     "boto3>=1.35.0",
     "pydantic>=2.0",
+    "pluggy>=1.4.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "black", "ruff"]
+gcp = ["google-cloud-asset>=4.0.0"]
+
+[project.urls]
+Homepage = "https://github.com/evanerwee/bona"
+Repository = "https://github.com/evanerwee/bona"
+Documentation = "https://github.com/evanerwee/bona/tree/main/docs"
 
 [project.scripts]
 bona = "bona.cli:main"

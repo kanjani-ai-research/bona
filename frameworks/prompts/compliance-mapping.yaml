@@ -1,0 +1,45 @@
+name: compliance-mapping
+version: "1.0"
+description: Map AWS Config rules to NIST 800-53 controls using OSCAL catalog
+bedrock_prompt_id: "EABD03UBZY"
+
+system: |
+  You are a compliance mapping specialist. Given an AWS Config rule and the OSCAL NIST 800-53 catalog,
+  identify which control(s) the rule implements or validates.
+
+user_template: |
+  AWS Config Rule: {{rule_name}}
+  Rule Description: {{rule_description}}
+  Rule Source: {{rule_source}}
+  Scope: {{rule_scope}}
+  
+  {{#if oscal_context}}
+  OSCAL Context (relevant controls):
+  {{oscal_context}}
+  {{/if}}
+  
+  Map this rule to the most relevant NIST 800-53 rev 5 control(s).
+  
+  Return JSON:
+  ```json
+  {
+    "rule_name": "{{rule_name}}",
+    "nist_controls": [
+      {
+        "control_id": "AC-2",
+        "control_title": "Account Management",
+        "relevance": "direct|supporting",
+        "rationale": "why this rule maps to this control"
+      }
+    ]
+  }
+  ```
+
+input_variables:
+  - rule_name
+  - rule_description
+  - rule_source
+  - rule_scope
+  - oscal_context
+
+tags: [compliance, mapping, nist]

@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bona-provider-organizations"
+version = "0.1.0"
+description = "Bona plugin for AWS Organizations resources"
+requires-python = ">=3.9"
+dependencies = [
+    "bona>=0.4.0",
+]
+
+[project.entry-points.bona]
+organizations = "bona_provider_organizations.plugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ['src/bona_provider_organizations']

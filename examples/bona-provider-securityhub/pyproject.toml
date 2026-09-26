@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bona-provider-securityhub"
+version = "0.1.0"
+description = "Bona plugin provider for AWS Security Hub"
+requires-python = ">=3.9"
+dependencies = [
+    "bona>=0.4.0",
+]
+
+[project.entry-points.bona]
+securityhub = "bona_provider_securityhub.plugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ['src/bona_provider_securityhub']

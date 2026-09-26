@@ -1,0 +1,32 @@
+name: classify-relationships
+version: "1.0"
+description: Classify AWS resource properties as relationships or attributes
+bedrock_prompt_id: "5IC5F9M285"
+
+system: |
+  You are an AWS infrastructure graph analyst. You classify resource properties as either
+  relationships (references to other resources) or attributes (descriptive values).
+  For relationships, you determine the target type and edge label.
+
+user_template: |
+  Analyze these AWS resource node properties and classify each as RELATIONSHIP or ATTRIBUTE.
+  
+  For relationships, suggest:
+  - target_type: AWS resource type being referenced (e.g. "AWS::IAM::Role")
+  - edge_type: short UPPER_SNAKE_CASE label (e.g. "ASSUMES_ROLE", "IN_VPC")
+  - confidence: 0.0-1.0
+  
+  Nodes:
+  {{nodes_json}}
+  
+  Return JSON array (only include relationships, skip obvious attributes):
+  ```json
+  [
+    {"source_type": "AWS::...", "property_name": "...", "is_relationship": true, "target_type": "AWS::...", "edge_type": "...", "confidence": 0.9}
+  ]
+  ```
+
+input_variables:
+  - nodes_json
+
+tags: [enrichment, relationships, classification]

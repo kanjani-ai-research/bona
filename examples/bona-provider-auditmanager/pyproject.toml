@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bona-provider-auditmanager"
+version = "0.1.0"
+description = "Bona plugin — AWS Audit Manager assessments and evidence"
+requires-python = ">=3.11"
+dependencies = ["bona>=0.4.0"]
+
+[project.entry-points."bona"]
+auditmanager = "bona_provider_auditmanager.plugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bona_provider_auditmanager"]
