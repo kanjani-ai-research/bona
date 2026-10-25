@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed (CI only, no image change)
+- GitHub Actions jobs in `.github/workflows/publish.yml` run on the CodeBuild-hosted runner `aigp-actions` in AWS instead of
+  GitHub-hosted `ubuntu-latest` (ADR-0216 am. 1 A9; guard-infra `bootstrap/79-ci-actions-runner.sh`). Rollback:
+  `runs-on: ubuntu-latest`.
+
 ## [0.2.0] - 2026-08-22
 
 ### Added
