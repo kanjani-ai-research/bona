@@ -4,7 +4,8 @@ on:
     tags: ['v*']
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    # CodeBuild-hosted runner in AWS (ADR-0216 am. 1 A9); back to GitHub-hosted: runs-on: ubuntu-latest
+    runs-on: codebuild-aigp-actions-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
